@@ -1,0 +1,12 @@
+{
+  "vocabulary_score": 7,
+  "context_relevance_score": 9,
+  "overall_score": 8,
+  "analysis": "Transcript chứa thông tin đầy đủ về tên và tuổi của người trả lời. Từ vựng sử dụng phong phú, cấu trúc câu rõ ràng. Tuy nhiên, có thể cải thiện bằng cách mô tả chi tiết hơn về bản thân.",
+  "feedback": "Để cải thiện, bạn có thể bổ sung thêm thông tin về nghề nghiệp, sở thích hoặc gia đình để trả lời câu hỏi một cách chi tiết hơn.",
+  "transcript_info": {
+    "word_count": 17,
+    "is_short_transcript": false,
+    "vocabulary_richness_applicable": true
+  }
+}

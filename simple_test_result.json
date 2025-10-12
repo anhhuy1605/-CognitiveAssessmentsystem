@@ -1,0 +1,13 @@
+{
+  "vocabulary_score": null,
+  "context_relevance_score": 8,
+  "overall_score": 8,
+  "analysis": "Transcript chứa thông tin chính xác về tuổi của người nói. Mặc dù ngắn gọn, câu trả lời vẫn đủ để hiểu ý định của người nói.",
+  "feedback": "Khuyến nghị mở rộng câu trả lời để cung cấp thêm thông tin chi tiết như kinh nghiệm, sở thích hoặc quan điểm cá nhân. Điều này sẽ giúp tạo sự kết nối tốt hơn với người nghe.",
+  "transcript_info": {
+    "word_count": 3,
+    "is_short_transcript": true,
+    "vocabulary_richness_applicable": false
+  },
+  "vocabulary_analysis": null
+}

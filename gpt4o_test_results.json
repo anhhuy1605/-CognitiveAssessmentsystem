@@ -1,0 +1,83 @@
+{
+  "test1_simple": {
+    "vocabulary_score": 5.0,
+    "context_relevance_score": 5.0,
+    "overall_score": 5.0,
+    "analysis": "Đánh giá không khả dụng do lỗi API",
+    "feedback": "Đánh giá không khả dụng do lỗi API",
+    "vocabulary_analysis": null,
+    "context_analysis": {
+      "relevance_level": "medium",
+      "accuracy": "uncertain",
+      "completeness": "partial",
+      "issues": [
+        "API không khả dụng"
+      ]
+    },
+    "cognitive_assessment": {
+      "language_fluency": "fair",
+      "cognitive_level": "medium",
+      "attention_focus": "fair",
+      "memory_recall": "fair"
+    },
+    "transcript_info": {
+      "word_count": 3,
+      "is_short_transcript": true,
+      "vocabulary_richness_applicable": true
+    }
+  },
+  "test2_descriptive": {
+    "vocabulary_score": 5.0,
+    "context_relevance_score": 5.0,
+    "overall_score": 5.0,
+    "analysis": "Đánh giá không khả dụng do lỗi API",
+    "feedback": "Đánh giá không khả dụng do lỗi API",
+    "vocabulary_analysis": null,
+    "context_analysis": {
+      "relevance_level": "medium",
+      "accuracy": "uncertain",
+      "completeness": "partial",
+      "issues": [
+        "API không khả dụng"
+      ]
+    },
+    "cognitive_assessment": {
+      "language_fluency": "fair",
+      "cognitive_level": "medium",
+      "attention_focus": "fair",
+      "memory_recall": "fair"
+    },
+    "transcript_info": {
+      "word_count": 16,
+      "is_short_transcript": false,
+      "vocabulary_richness_applicable": true
+    }
+  },
+  "test3_english": {
+    "vocabulary_score": 5.0,
+    "context_relevance_score": 5.0,
+    "overall_score": 5.0,
+    "analysis": "Evaluation not available due to API issues",
+    "feedback": "Evaluation not available due to API issues",
+    "vocabulary_analysis": null,
+    "context_analysis": {
+      "relevance_level": "medium",
+      "accuracy": "uncertain",
+      "completeness": "partial",
+      "issues": [
+        "API not available"
+      ]
+    },
+    "cognitive_assessment": {
+      "language_fluency": "fair",
+      "cognitive_level": "medium",
+      "attention_focus": "fair",
+      "memory_recall": "fair"
+    },
+    "transcript_info": {
+      "word_count": 5,
+      "is_short_transcript": true,
+      "vocabulary_richness_applicable": true
+    }
+  }
+}

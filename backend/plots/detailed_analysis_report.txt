@@ -1,0 +1,79 @@
+================================================================================
+BÁO CÁO PHÂN TÍCH CHI TIẾT - HỆ THỐNG COGNITIVE ASSESSMENT
+================================================================================
+
+1. TỔNG QUAN DỮ LIỆU
+----------------------------------------
+Số mẫu: 236
+MMSE Statistics:
+  - Trung bình: 23.2
+  - Độ lệch chuẩn: 6.9
+  - Min: 3.0, Max: 30.0
+Age Statistics:
+  - Trung bình: 67.8
+  - Độ lệch chuẩn: 6.8
+  - Min: 53, Max: 80
+Diagnosis Distribution:
+  - ProbableAD: 122 (51.7%)
+  - Control: 114 (48.3%)
+
+
+2. PHÂN TÍCH ĐẶC TRƯNG ACOUSTIC
+----------------------------------------
+Số đặc trưng acoustic: 15
+Các đặc trưng:
+  - dur.mean
+  - dur.sd
+  - dur.median
+  - srate.mean
+  - srate.max
+  - srate.min
+  - srate.sd
+  - number.utt
+  - sildur.mean
+  - sildur.sd
+  - sildur.median
+  - dur.max
+  - sildur.max
+  - dur.min
+  - sildur.min
+
+Tương quan với MMSE:
+  - dur.mean: r = -0.063
+  - dur.sd: r = -0.095
+  - dur.median: r = -0.058
+  - srate.mean: r = nan
+  - srate.max: r = nan
+  - srate.min: r = nan
+  - srate.sd: r = nan
+  - number.utt: r = -0.001
+  - sildur.mean: r = nan
+  - sildur.sd: r = nan
+
+
+3. HIỆU SUẤT MÔ HÌNH
+----------------------------------------
+
+Mô hình: Random Forest
+
+Mô hình: XGBoost
+
+Mô hình: SVM
+
+Mô hình: LightGBM
+
+
+4. KHUYẾN NGHỊ
+----------------------------------------
+⚠️  Trung bình MMSE thấp - cần cải thiện độ chính xác mô hình
+🏆 Mô hình tốt nhất: Random Forest
+
+📊 Các biểu đồ đã được tạo:
+  - model_performance_overview.png
+  - data_distribution_analysis.png
+  - acoustic_features_analysis.png
+  - correlation_heatmap.png
+  - error_analysis.png
+  - demographic_analysis.png
+  - acoustic_mmse_correlations.png
+  - model_comparison.png

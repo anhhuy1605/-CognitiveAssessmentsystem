@@ -1,0 +1,176 @@
+# ==================================
+# DOCKERIGNORE - GIẢM IMAGE SIZE & BẢO MẬT
+# ==================================
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments (don't copy local venvs)
+venv/
+env/
+ENV/
+.venv/
+.ok/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+*.cover
+.hypothesis/
+.tox/
+
+# IDE & Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Environment files (CRITICAL - don't include secrets!)
+.env
+.env.local
+.env.*.local
+.env.production
+config.env
+*.env
+
+# Documentation
+README.md
+README_*.md
+*.md
+docs/
+documentation/
+
+# Development only
+docker-compose.yml
+Dockerfile.dev
+.dockerignore
+
+# Logs (don't need in image)
+*.log
+logs/
+*.log.*
+transcriber.log
+backend.log
+cognitive_assessment.log
+
+# Database files (local only)
+*.db
+*.sqlite
+*.sqlite3
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+.cache/
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+.eggs/
+
+# Jupyter notebooks
+*.ipynb
+.ipynb_checkpoints/
+
+# Data files (usually large, load from external storage)
+data/
+datasets/
+*.csv
+*.json
+!questions.json
+!config/*.json
+
+# Model files (if large, load from external)
+# Uncomment if your models are huge (>500MB)
+# *.pth
+# *.pt
+# *.bin
+# *.safetensors
+
+# Audio files (load from Vercel Blob instead)
+*.wav
+*.mp3
+*.m4a
+*.ogg
+*.flac
+!test_audio.wav
+
+# Images
+*.png
+*.jpg
+*.jpeg
+*.gif
+!favicon.ico
+
+# Archives
+*.zip
+*.tar
+*.tar.gz
+*.rar
+
+# OS specific
+Thumbs.db
+desktop.ini
+
+# Test files
+test_*.py
+*_test.py
+tests/
+test/
+
+# Scripts (usually not needed in production)
+scripts/
+setup.py
+setup_dependencies.py
+install_*.py
+install_*.ps1
+install_*.sh
+
+# Nginx config (if using external reverse proxy)
+nginx/
+
+# Worker configs (if using Celery separately)
+workers/
+
+# Evaluation & analysis (not needed in prod)
+eval-data*.csv
+evaluation_results/
+plots/
+artifacts/
+reports/
+results/
+
+# Training data
+fine_tune_data/
+
+# Text records
+text-records/
+
+# Node modules (shouldn't be in backend anyway)
+node_modules/
+
+# Backup files
+*.bak
+*.backup
+backup_*.sql
+
+# Debug files
+debug_*.py
+debug_*.js
+*_debug.*
+gpt_debug_result.json
+
