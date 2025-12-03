@@ -6,6 +6,7 @@ import AboutProject from "@/components/info/AboutProject";
 import MCIExplanation from "@/components/info/MCIExplanation";
 import AITechnology from "@/components/info/AITechnology";
 import ResultsMetrics from "@/components/info/ResultsMetrics";
+import ComprehensiveResultsReport from "@/components/info/ComprehensiveResultsReport";
 import TeamSection from "@/components/info/TeamSection";
 import ContactSection from "@/components/info/ContactSection";
 import Link from "next/link";
@@ -33,6 +34,7 @@ export default function InfoPageClient() {
           <MCIExplanation />
           <AITechnology />
           <ResultsMetrics />
+          <ComprehensiveResultsReport />
           <TeamSection />
           {/* News moved to dedicated page to keep /info concise */}
           <div className="py-8">

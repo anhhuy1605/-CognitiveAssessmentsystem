@@ -23,6 +23,8 @@ from scipy.stats import skew, kurtosis
 import logging
 from typing import Dict, List, Tuple, Optional, Union, Any
 import os
+import sys
+from pathlib import Path
 import torch
 import warnings
 warnings.filterwarnings('ignore')
@@ -540,6 +542,74 @@ class AudioFeatureExtractor:
 
         return quality
 
+    # --- Vietnamese acoustic features integration (optional) ---
+    def extract_vi_features(self, audio_path: str) -> Dict[str, float]:
+        """
+        Integrate Vietnamese-specific acoustic features from the subproject if available.
+        Merges: F0 residual, formants (F1/F2/F3), voice quality (jitter/shimmer/HNR), pause metrics.
+        Returns a flat dict with keys prefixed by 'vi_'.
+        """
+        vi_features: Dict[str, float] = {}
+
+        # Attempt dynamic import of subproject modules once
+        try:
+            # Ensure subproject src is on sys.path
+            project_root = Path(__file__).resolve().parents[1]
+            vi_src = project_root / 'vietnamese-cognitive-assessment' / 'src'
+            if str(vi_src) not in sys.path and vi_src.exists():
+                sys.path.insert(0, str(vi_src))
+
+            from src.audio_processing.f0_extraction import extract_f0_residual  # type: ignore
+            from src.audio_processing.formants import extract_formants_vietnamese  # type: ignore
+            from src.audio_processing.voice_quality import extract_voice_quality as vi_extract_voice_quality  # type: ignore
+            from src.audio_processing.pause_detection import PauseDetector as ViPauseDetector  # type: ignore
+        except Exception as e:
+            logger.info(f"Vietnamese feature modules unavailable: {e}")
+            return vi_features
+
+        # F0 residual features
+        try:
+            f0_res = extract_f0_residual(audio_path)
+            for k, v in f0_res.items():
+                vi_features[f"vi_{k}"] = float(v) if isinstance(v, (int, float)) else v
+        except Exception as e:
+            logger.warning(f"VI f0 residual extraction failed: {e}")
+
+        # Formant features
+        try:
+            formants = extract_formants_vietnamese(audio_path)
+            mapping = {
+                'f1_mean': 'vi_f1_mean',
+                'f1_std': 'vi_f1_std',
+                'f2_mean': 'vi_f2_mean',
+                'f2_std': 'vi_f2_std',
+                'f3_mean': 'vi_f3_mean',
+                'formant_dispersion': 'vi_formant_dispersion',
+            }
+            for k, v in formants.items():
+                vi_features[mapping.get(k, f"vi_{k}")] = float(v) if isinstance(v, (int, float)) else v
+        except Exception as e:
+            logger.warning(f"VI formant extraction failed: {e}")
+
+        # Voice quality features
+        try:
+            vq = vi_extract_voice_quality(audio_path)
+            for k, v in vq.items():
+                vi_features[f"vi_{k}"] = float(v) if isinstance(v, (int, float)) else v
+        except Exception as e:
+            logger.warning(f"VI voice quality extraction failed: {e}")
+
+        # Pause analysis (energy-based VAD)
+        try:
+            pd_vi = ViPauseDetector()
+            pause = pd_vi.analyze_pauses(audio_path)
+            for k, v in pause.items():
+                vi_features[f"vi_{k}"] = float(v) if isinstance(v, (int, float)) else v
+        except Exception as e:
+            logger.warning(f"VI pause analysis failed: {e}")
+
+        return vi_features
+
     def extract_all_features(self, audio_path: str) -> Dict[str, Any]:
         """
         Extract all audio features for MMSE assessment.
@@ -560,6 +630,15 @@ class AudioFeatureExtractor:
         wav2vec_features = self.extract_wav2vec_features(audio)
         temporal_features = self.extract_temporal_features(audio)
         quality_features = self.extract_audio_quality(audio)
+
+        # Enrich quality group with Vietnamese-specific acoustic features (optional)
+        try:
+            vi_feats = self.extract_vi_features(audio_path)
+            if vi_feats:
+                quality_features.update(vi_feats)
+                logger.info(f"✅ Integrated VI features: {len(vi_feats)} keys")
+        except Exception as e:
+            logger.warning(f"Skipping VI features integration: {e}")
 
         # Combine all features
         features = {

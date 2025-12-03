@@ -1,15 +1,14 @@
-"use client";
-
 import NewsResearch from "@/components/info/NewsResearch";
 import NewsDetail from "@/components/info/NewsDetail";
 
 interface PageProps {
-  searchParams: { page?: string; url?: string } | null;
+  searchParams?: Promise<any>;
 }
 
-export default function InfoNewsPage({ searchParams }: PageProps) {
-  const page = searchParams?.page ?? '1';
-  const url = searchParams?.url ?? undefined;
+export default async function InfoNewsPage({ searchParams }: PageProps) {
+  const sp = (await searchParams) as { page?: string; url?: string } | undefined;
+  const page = sp?.page ?? '1';
+  const url = sp?.url ?? undefined;
 
   if (url) {
     return (

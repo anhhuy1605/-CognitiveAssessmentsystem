@@ -2,21 +2,6 @@
   "name": "cognitive-assessment-root",
   "private": true,
   "scripts": {
-    "build": "cd frontend && npm ci && npm run build"
-  },
-  "dependencies": {
-    "@clerk/nextjs": "^6.31.10",
-    "@types/react": "^18.3.24",
-    "@types/react-dom": "^18.3.7",
-    "chart.js": "^4.5.0",
-    "jspdf": "^3.0.2",
-    "jspdf-autotable": "^5.0.2",
-    "papaparse": "^5.5.3",
-    "react": "^18.3.1",
-    "react-chartjs-2": "^5.3.0",
-    "react-dom": "^18.3.1"
-  },
-  "devDependencies": {
-    "@types/papaparse": "^5.3.16"
+    "build": "cd frontend && npm ci --no-audit --no-fund && npm run build"
   }
 }

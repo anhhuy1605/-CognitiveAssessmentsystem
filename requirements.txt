@@ -47,7 +47,6 @@ cryptography==41.0.4
 # Utilities
 pathlib2==2.3.7
 tqdm==4.66.1
-argparse==1.4.0
 
 # Vietnamese language processing (optional)
 underthesea==6.6.1
@@ -57,7 +56,6 @@ pytest==7.4.2
 pytest-cov==4.1.0
 
 # Async support
-asyncio==3.4.3
 
 # Additional utilities for ML pipeline
 xgboost==1.7.6
@@ -71,10 +69,8 @@ ffmpeg-python==0.2.0
 plotly==5.16.1
 
 # Type checking
-typing-extensions==4.7.1
 
 # Concurrent processing
-concurrent-futures==3.1.1
 
 # Heroku specific
 whitenoise==6.5.0

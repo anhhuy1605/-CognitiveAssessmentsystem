@@ -1,0 +1,24 @@
+# Frontend .dockerignore
+.next
+.turbo
+.vercel
+coverage
+.eslintcache
+node_modules
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-store
+*.log
+
+# Local data files not needed in images
+records
+recordings
+*.webm
+*.mp3
+*.wav
+
+# OS/editor files
+.DS_Store
+.vscode
+.idea

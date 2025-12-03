@@ -437,6 +437,7 @@ export default function CognitiveAssessmentPage() {
   const [communityEmail, setCommunityEmail] = useState<string>('');
   const [communityName, setCommunityName] = useState<string>('');
   const [showCommunityModal, setShowCommunityModal] = useState<boolean>(false);
+  const [usageMode, setUsageMode] = useState<'community' | 'personal'>('personal');
   const showPerQuestionMMSE = false;
 
   // Additional state variables
@@ -466,7 +467,7 @@ export default function CognitiveAssessmentPage() {
   const recordStartWatchdogRef = useRef<NodeJS.Timeout | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const manualTranscriptRef = useRef<HTMLTextAreaElement>(null);
+  const manualTranscriptRef = useRef<HTMLDivElement>(null);
   const currentQuestion = questions?.[currentQuestionIndex];
 
 
@@ -1814,24 +1815,72 @@ export default function CognitiveAssessmentPage() {
       clearTimeout(recordStartWatchdogRef.current);
       recordStartWatchdogRef.current = null;
     }
-  };
-
-    // Auto-transcribe after recording - removed manual transcript
-    // setShowTranscriptInput(false); // Commented out - variable removed
     if (audioUrl) {
       URL.revokeObjectURL(audioUrl);
       setAudioUrl(null);
     }
   };
-
-
+  
+  
+  
   const handleFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      // setCurrentAudio(file); // Commented out - variable removed
-      // setError(null); // Commented out - variable removed
+
+    // Allow re-uploading the same file
+    if (e.target) {
+      try {
+        // eslint-disable-next-line no-param-reassign
+        (e.target as HTMLInputElement).value = '';
+      } catch {}
     }
-  }, []);
+
+    if (!file) return;
+
+    try {
+      // Treat uploaded file as the current audio blob, giống như bản ghi âm vừa xong
+      (window as ExtendedWindow).lastAudioBlob = file;
+
+      // Optional: tạo URL để nghe lại nếu cần
+      try {
+        const url = URL.createObjectURL(file);
+        setAudioUrl(url);
+      } catch {}
+
+      // Đánh dấu là đã có "recording" cho câu hiện tại
+      setHasRecording(true);
+      setIsRecording(false);
+      setIsRecordingStarted(false);
+
+      // Cập nhật trạng thái câu hỏi sang PROCESSING (giống luồng ghi âm)
+      if (questions && questions.length > 0 && currentQuestionIndex >= 0 && currentQuestionIndex < questions.length) {
+        const currentQuestionId = currentQuestionIndex + 1;
+        updateQuestionStatus(currentQuestionId, 'processing', {
+          answer: 'Uploaded audio file - processing...',
+          audioBlob: file,
+          timestamp: new Date()
+        });
+
+        // Nếu không ở training mode, tự động chạy auto-transcription ở background
+        if (!trainingMode) {
+          setIsAutoTranscribing(true);
+          setAutoTranscriptionResult(null);
+
+          setTimeout(() => {
+            autoTranscribeAudio().catch(error => {
+              console.error('❌ File upload auto-transcription failed:', error);
+              updateQuestionStatus(currentQuestionId, 'failed', {
+                error: error?.message || 'Background processing failed (file upload)'
+              });
+              setIsAutoTranscribing(false);
+            });
+          }, 300);
+        }
+      }
+    } catch (err) {
+      console.error('❌ Error handling audio file upload:', err);
+      alert('Không thể xử lý file audio được chọn. Vui lòng thử lại với file khác.');
+    }
+  }, [questions, currentQuestionIndex, trainingMode, updateQuestionStatus]);
 
   // Updated to use queue system for asynchronous processing
   // Unified handler after recording/transcription completes
@@ -2936,7 +2985,7 @@ export default function CognitiveAssessmentPage() {
   }, []);
 
   if (isLoading) {
-  return (
+    return (
       <div className="min-h-screen max-h-[150vh] overflow-auto" style={{
         background: 'linear-gradient(135deg, #FEF3E2 0%, #FAE6D0 50%, #F5D7BE 100%)'
       }}>
@@ -4209,3 +4258,4 @@ export default function CognitiveAssessmentPage() {
     </div>
   );
 
+}

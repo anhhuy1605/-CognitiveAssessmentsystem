@@ -20,6 +20,7 @@ from torch.nn import TransformerEncoder, TransformerEncoderLayer
 import numpy as np
 import logging
 from typing import Dict, List, Tuple, Optional, Union, Any
+import os
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -45,31 +46,65 @@ class AudioEncoder(nn.Module):
         """
         super().__init__()
 
+        # Config
+        self.model_name = model_name
+        self.freeze_encoder = freeze_encoder
+
+        # Lazy model handle
+        self._wav2vec = None  # type: Optional[Any]
+
+        # Default dimensions before model load
+        self.hidden_size = 768
+
+        # Pooling layers independent of actual encoder load
+        self.attention_pool = nn.Sequential(
+            nn.Linear(self.hidden_size, self.hidden_size // 2),
+            nn.Tanh(),
+            nn.Linear(self.hidden_size // 2, 1)
+        )
+
+        self.dropout = nn.Dropout(0.1)
+
+    @property
+    def wav2vec(self):
+        """Lazily initialize Wav2Vec2 model with memory-efficient options."""
+        if self._wav2vec is not None:
+            return self._wav2vec
+
+        # Optional skip for constrained environments
+        if os.getenv('SKIP_MODEL_LOAD') == '1':
+            logger.warning("SKIP_MODEL_LOAD=1: Skipping Wav2Vec2 initialization")
+            self._wav2vec = None
+            return self._wav2vec
+
         try:
             from transformers import Wav2Vec2Model
-            self.wav2vec = Wav2Vec2Model.from_pretrained(model_name)
-            self.hidden_size = self.wav2vec.config.hidden_size
+            # Memory-efficient loading
+            self._wav2vec = Wav2Vec2Model.from_pretrained(
+                self.model_name,
+                low_cpu_mem_usage=True,
+                torch_dtype=torch.float16
+            )
 
-            if freeze_encoder:
-                for param in self.wav2vec.parameters():
+            # Update hidden size from config if available
+            try:
+                self.hidden_size = int(self._wav2vec.config.hidden_size)
+            except Exception:
+                pass
+
+            if self.freeze_encoder:
+                for param in self._wav2vec.parameters():
                     param.requires_grad = False
                 logger.info("✅ Wav2Vec2 encoder frozen")
 
-            # Pooling layers
-            self.attention_pool = nn.Sequential(
-                nn.Linear(self.hidden_size, self.hidden_size // 2),
-                nn.Tanh(),
-                nn.Linear(self.hidden_size // 2, 1)
-            )
+            logger.info(f"✅ Wav2Vec2 lazily loaded: {self.model_name}")
 
-            self.dropout = nn.Dropout(0.1)
+        except (ImportError, OSError, MemoryError) as e:
+            logger.error(f"Failed to load Wav2Vec2: {e}")
+            logger.warning("Running in degraded mode - audio encoder disabled")
+            self._wav2vec = None
 
-        except ImportError:
-            logger.warning("⚠️ Transformers not available, using dummy encoder")
-            self.hidden_size = 768
-            self.wav2vec = None
-            self.attention_pool = nn.Linear(self.hidden_size, 1)
-            self.dropout = nn.Dropout(0.1)
+        return self._wav2vec
 
     def forward(self, input_values: torch.Tensor, attention_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
         """

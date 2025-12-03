@@ -1,0 +1,24 @@
+computed_metrics:
+  auc: null
+  mae: null
+data_sources:
+- processed_alzheimer_data.csv (adapted for analysis)
+- synthetic data for missing components
+generated_plots:
+- fig_confusion_matrix.png
+- fig_roc.png
+- fig_pr.png
+- fig_shap_top10.png
+- fig_shap_local_subj_001.png
+- fig_shap_local_subj_002.png
+- fig_shap_local_subj_003.png
+- fig_transcript_examples.png
+- fig_mmse_scatter.png
+- fig_mae_boxplot.png
+- fig_asr_wers_by_region.png
+- fig_audio_lengths_hist.png
+- fig_pipeline.png
+- fig_title.png
+generation_timestamp: '2025-10-17T12:46:03.029286'
+missing_items_count: 14
+n_samples: 100

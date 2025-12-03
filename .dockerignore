@@ -1,0 +1,47 @@
+# Root .dockerignore
+# Reduce build context size; do not affect runtime behavior
+.git
+.gitignore
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/.venv/
+**/venv/
+**/.env
+**/.env.*
+**/.DS_Store
+node_modules
+**/node_modules
+
+# Frontend build artifacts
+frontend/.next
+frontend/.turbo
+frontend/.vercel
+frontend/coverage
+frontend/.eslintcache
+
+# Python build artifacts
+**/build/
+**/dist/
+**/*.egg-info/
+
+# Data, logs, and large local directories
+records
+recordings
+**/logs/
+**/*.log
+**/artifacts/
+**/checkpoints/
+**/model_bundle/
+**/output/
+**/results/
+**/exports/
+
+# Not needed inside images
+.vscode
+.idea
+*.code-workspace

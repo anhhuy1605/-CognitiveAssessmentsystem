@@ -1,0 +1,51 @@
+name: Simple Deploy
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-deploy:
+    name: Test & Deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Basic syntax checks only
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Check frontend syntax
+        run: |
+          cd frontend
+          npm install
+          npm run build
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Check backend syntax
+        run: |
+          cd backend
+          python -m py_compile app.py
+
+      - name: Deploy Status
+        run: |
+          echo "✅ Basic checks passed!"
+          echo "Manual deployment required:"
+          echo "1. Push to GitHub (done)"
+          echo "2. Deploy backend to Railway"
+          echo "3. Deploy frontend to Vercel"
+          echo ""
+          echo "See DEPLOYMENT_GUIDE_CUSTOM.md for detailed instructions"

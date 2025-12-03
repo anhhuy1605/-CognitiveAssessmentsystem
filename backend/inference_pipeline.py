@@ -124,7 +124,7 @@ class MMSEInferencePipeline:
             sample_rate=config.sample_rate
         )
 
-        # Model (will be loaded later)
+        # Model handle (lazy load)
         self.model = None
 
         # ASR processor
@@ -164,11 +164,17 @@ class MMSEInferencePipeline:
         Args:
             model_path: Path to model checkpoint (overrides config)
         """
+        # Respect SKIP_MODEL_LOAD env flag
+        import os
+        if os.getenv('SKIP_MODEL_LOAD') == '1':
+            logger.warning("SKIP_MODEL_LOAD=1: Deferring model load")
+            self.model = MultiTaskMMSEModel()
+            return
+
         model_path = model_path or self.config.model_path
 
         if not model_path or not Path(model_path).exists():
-            logger.warning("⚠️ No model checkpoint provided, using default model")
-            # Create default model for testing
+            logger.warning("⚠️ No model checkpoint provided; initializing lightweight model (lazy encoders)")
             self.model = MultiTaskMMSEModel()
             return
 
@@ -534,16 +540,18 @@ class MMSEInferencePipeline:
             'timestamp': pd.Timestamp.now().isoformat()
         }
 
-        # Extract MMSE scores
+        # Extract MMSE scores with sanity clamping
         if 'total_mmse' in predictions:
             if isinstance(predictions['total_mmse'], dict):
                 # Uncertainty-aware prediction
-                results['mmse_score'] = predictions['total_mmse']['mmse_mean']
+                mmse_mean = float(predictions['total_mmse']['mmse_mean'])
+                results['mmse_score'] = float(max(0.0, min(30.0, mmse_mean)))
                 results['mmse_confidence_interval'] = predictions['total_mmse']['mmse_95ci']
                 results['mmse_uncertainty'] = predictions['total_mmse']['mmse_std']
             else:
                 # Standard prediction
-                results['mmse_score'] = float(predictions['total_mmse'].item() * 30)  # Scale to 0-30
+                score = float(predictions['total_mmse'].item() * 30)
+                results['mmse_score'] = float(max(0.0, min(30.0, score)))
                 results['mmse_uncertainty'] = None
 
         # Cognitive classification
@@ -559,6 +567,9 @@ class MMSEInferencePipeline:
                     cog_probs = cog_probs[0]
 
             if isinstance(cog_probs, list) and len(cog_probs) >= 3:
+                # Normalize to sum=1 for sanity
+                s = sum(cog_probs[:3]) or 1.0
+                cog_probs = [p / s for p in cog_probs[:3]]
                 results['cognitive_probabilities'] = {
                     'normal': cog_probs[0],
                     'mci': cog_probs[1],

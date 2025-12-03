@@ -8,9 +8,10 @@ transformers>=4.15.0
 
 # Audio processing
 openai-whisper>=20230124
-librosa>=0.9.0
-soundfile>=0.10.0
+librosa>=0.10.0
+soundfile>=0.12.1
 pydub>=0.25.0
+praat-parselmouth>=0.4.3
 
 # Pipeline system
 flask>=2.0.0
@@ -22,17 +23,10 @@ lime>=0.2.0
 python-dotenv>=1.0.0
 
 # Database
-psycopg2-binary>=2.9.9
-
-# Production server
-gunicorn>=21.2.0
-
-# Rate limiting & security
-flask-limiter>=3.5.0
-flask-talisman>=1.1.0
+pg>=0.0.0
 
 # Optional Vietnamese processing
-# underthesea>=6.6.0
+underthesea>=6.6.0
 
 # Optional Chinese processing
 # jieba>=0.42.1

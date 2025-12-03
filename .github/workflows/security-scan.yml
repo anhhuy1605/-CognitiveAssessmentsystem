@@ -1,0 +1,401 @@
+name: Security Scan
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  schedule:
+    # Run weekly on Sundays at 2 AM UTC
+    - cron: '0 2 * * 0'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+  checks: write
+
+jobs:
+  # ================================
+  # Code Security Scan
+  # ================================
+  codeql:
+    name: CodeQL Security Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    # Permissions inherited from workflow level
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: false
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript, python
+          queries: security-and-quality
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:javascript"
+
+      - name: Perform CodeQL Analysis (Python)
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:python"
+
+  # ================================
+  # Dependency Vulnerability Scan
+  # ================================
+  dependency-scan:
+    name: Dependency Vulnerability Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    continue-on-error: true
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: false
+
+      # Scan Node.js dependencies
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: '**/package-lock.json'
+
+      - name: Install frontend dependencies
+        run: |
+          npm --prefix frontend ci
+
+      - name: Run npm audit
+        run: |
+          npm --prefix frontend audit --audit-level=moderate || true
+
+      - name: Lint (if available)
+        run: |
+          LINT_VAL=$(npm --prefix frontend pkg get scripts.lint 2>/dev/null | tr -d ' \n"')
+          if [ -n "$LINT_VAL" ] && [ "$LINT_VAL" != "undefined" ]; then
+            npm --prefix frontend run lint || true
+          else
+            echo "No lint script found, skipping"
+          fi
+
+      - name: Run Snyk for Node.js
+        if: ${{ env.SNYK_TOKEN != '' }}
+        uses: snyk/actions/node@master
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          command: test
+
+      # Scan Python dependencies
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: |
+            backend/requirements.txt
+
+      - name: Install backend dependencies
+        run: |
+          cd backend
+          pip install -r requirements.txt
+
+      - name: Run Safety for Python
+        run: |
+          pip install safety
+          safety check --full-report
+
+      - name: Run Bandit for Python security
+        run: |
+          pip install bandit
+          cd backend
+          bandit -r . -f json -o bandit-report.json || true
+          cat bandit-report.json
+
+  # ================================
+  # Container Security Scan
+  # ================================
+  container-scan:
+    name: Container Security Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    continue-on-error: true
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: false
+
+      # Build backend container
+      - name: Build Docker image
+        run: |
+          cd backend
+          docker build -t cognitive-backend:scan .
+
+      # Scan with Trivy
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          scan-type: 'image'
+          scan-ref: 'cognitive-backend:scan'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'MEDIUM,HIGH,CRITICAL'
+
+      - name: Upload Trivy scan results
+        if: ${{ always() && hashFiles('trivy-results.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-results.sarif'
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Alternative: Scan with Docker Scout
+      - name: Scan with Docker Scout
+        if: ${{ env.DOCKER_SCOUT_ENABLED == 'true' }}
+        run: |
+          docker scout quickview cognitive-backend:scan || true
+
+  # ================================
+  # Secrets Detection
+  # ================================
+  secrets-scan:
+    name: Secrets Detection
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: false
+
+      # Scan with GitLeaks
+      - name: Run GitLeaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          config-path: .gitleaks.toml
+
+      # Alternative: Scan with TruffleHog
+      - name: Run TruffleHog (CLI)
+        continue-on-error: true
+        run: |
+          python -m pip install --upgrade pip >/dev/null 2>&1 || true
+          pip install --quiet trufflehog
+          trufflehog --json --only-verified . || true
+
+  # ================================
+  # Infrastructure as Code Scan
+  # ================================
+  iac-scan:
+    name: Infrastructure as Code Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: false
+
+      # Scan Docker files
+      - name: Scan Dockerfile with Hadolint
+        if: ${{ env.HADOLINT_ENABLED == 'true' }}
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: backend/Dockerfile
+          config: .hadolint.yaml
+
+      # Scan Kubernetes manifests (if any)
+      - name: Scan Kubernetes manifests
+        if: ${{ env.KUBESCAN_ENABLED == 'true' }}
+        uses: checkmarx/kics-github-action@v2.1.0
+        with:
+          path: '.'
+          config_path: '.kics-config.yaml'
+
+  # ================================
+  # License Compliance Check
+  # ================================
+  license-check:
+    name: License Compliance Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Check licenses
+        run: |
+          cd frontend
+          npm install
+          npx license-checker --production --csv > license-report.csv
+          cat license-report.csv
+
+      - name: Check for copyleft licenses
+        run: |
+          if grep -i "GPL\|LGPL\|AGPL\|MPL" license-report.csv; then
+            echo "⚠️  Copyleft licenses detected"
+            exit 1
+          else
+            echo "✅ No copyleft licenses found"
+          fi
+
+  # ================================
+  # Security Test Results Summary
+  # ================================
+  security-summary:
+    name: Security Summary
+    runs-on: ubuntu-latest
+    needs: [codeql, dependency-scan, container-scan, secrets-scan, iac-scan, license-check]
+    if: always()
+    env:
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: false
+
+      - name: Generate security summary
+        run: |
+          echo "# Security Scan Summary" > security-summary.md
+          echo "" >> security-summary.md
+          echo "**Date:** $(date)" >> security-summary.md
+          echo "**Commit:** ${{ github.sha }}" >> security-summary.md
+          echo "**Branch:** ${{ github.ref }}" >> security-summary.md
+          echo "" >> security-summary.md
+
+          echo "## Scan Results" >> security-summary.md
+          echo "" >> security-summary.md
+
+          # CodeQL
+          if [[ "${{ needs.codeql.result }}" == "success" ]]; then
+            echo "✅ CodeQL Security Scan: PASSED" >> security-summary.md
+          else
+            echo "❌ CodeQL Security Scan: FAILED" >> security-summary.md
+          fi
+
+          # Dependencies
+          if [[ "${{ needs.dependency-scan.result }}" == "success" ]]; then
+            echo "✅ Dependency Vulnerability Scan: PASSED" >> security-summary.md
+          else
+            echo "❌ Dependency Vulnerability Scan: FAILED" >> security-summary.md
+          fi
+
+          # Container
+          if [[ "${{ needs.container-scan.result }}" == "success" ]]; then
+            echo "✅ Container Security Scan: PASSED" >> security-summary.md
+          else
+            echo "❌ Container Security Scan: FAILED" >> security-summary.md
+          fi
+
+          # Secrets
+          if [[ "${{ needs.secrets-scan.result }}" == "success" ]]; then
+            echo "✅ Secrets Detection: PASSED" >> security-summary.md
+          else
+            echo "❌ Secrets Detection: FAILED" >> security-summary.md
+          fi
+
+          # IaC
+          if [[ "${{ needs.iac-scan.result }}" == "success" ]]; then
+            echo "✅ Infrastructure as Code Scan: PASSED" >> security-summary.md
+          else
+            echo "⚠️  Infrastructure as Code Scan: WARNING" >> security-summary.md
+          fi
+
+          # License
+          if [[ "${{ needs.license-check.result }}" == "success" ]]; then
+            echo "✅ License Compliance: PASSED" >> security-summary.md
+          else
+            echo "❌ License Compliance: FAILED" >> security-summary.md
+          fi
+
+          echo "" >> security-summary.md
+          echo "## Recommendations" >> security-summary.md
+          echo "" >> security-summary.md
+          echo "1. Review all failed scans in the GitHub Security tab" >> security-summary.md
+          echo "2. Address high-priority vulnerabilities immediately" >> security-summary.md
+          echo "3. Update dependencies regularly" >> security-summary.md
+          echo "4. Use Dependabot for automated updates" >> security-summary.md
+          echo "5. Enable branch protection rules" >> security-summary.md
+
+          cat security-summary.md
+
+      - name: Upload security summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-summary
+          path: security-summary.md
+
+      # Send notification for failed scans
+      - name: Notify on security failures
+        if: ${{ failure() && env.SLACK_WEBHOOK_URL != '' }}
+        uses: rtCamp/action-slack-notify@v2
+        env:
+          SLACK_WEBHOOK: ${{ env.SLACK_WEBHOOK_URL }}
+          SLACK_MESSAGE: 'Security vulnerabilities detected. Check the Security tab and artifacts.'
+          SLACK_TITLE: 'Security Scan Failed'
+
+# ================================
+# Required Secrets
+# ================================
+# Add these to GitHub repository secrets:
+# SNYK_TOKEN (optional - for Snyk vulnerability scanning)
+# DOCKER_SCOUT_ENABLED (optional - set to 'true' to enable Docker Scout)
+# HADOLINT_ENABLED (optional - set to 'true' to enable Dockerfile linting)
+# KUBESCAN_ENABLED (optional - set to 'true' to enable Kubernetes scanning)
+# SLACK_WEBHOOK_URL (optional - for notifications)
+
+# ================================
+# Configuration Files
+# ================================
+# Create these optional config files in your repository root:
+
+# .hadolint.yaml (for Dockerfile linting)
+# kics-config.yaml (for Kubernetes IaC scanning)
+# .gitleaks.toml (for custom secrets patterns)
+
+# ================================
+# Branch Protection
+# ================================
+# Enable these branch protection rules for main branch:
+# - Require status checks to pass (include all security jobs)
+# - Require up-to-date branches
+# - Include administrators
+# - Restrict pushes that create matching branches

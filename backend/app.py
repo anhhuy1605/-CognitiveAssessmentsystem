@@ -19,6 +19,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 import queue
 import torch
+import joblib
 
 # Setup logging early
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -345,9 +346,16 @@ try:
     )
 
     mmse_pipeline = MMSEInferencePipeline(inference_config)
-    mmse_pipeline.load_model()  # Load default model
 
-    logger.info("✅ MMSE Inference Pipeline initialized successfully")
+    # Defer heavy model loading; provide initializer callable
+    def initialize_model():
+        try:
+            mmse_pipeline.load_model()
+            logger.info("✅ MMSE model initialized (deferred)")
+        except Exception as e:
+            logger.error(f"❌ Deferred model initialization failed: {e}")
+
+    logger.info("✅ MMSE Inference Pipeline initialized (model load deferred)")
 
 except ImportError as e:
     logger.warning(f"⚠️ Cannot import MMSE inference pipeline: {e}")
@@ -778,45 +786,140 @@ def queue_worker():
             logger.error(f"❌ Queue worker error: {e}")
             time_module.sleep(1)
 
-def initialize_model():
-    """Initialize cognitive assessment model with error handling"""
-    global cognitive_model, feature_names, vietnamese_transcriber
+# Global variables for model components
+model_scaler = None
+model_selector = None
+
+def load_model_bundle():
+    """
+    Load pre-trained model bundle from model_bundle/improved_regression_model/
     
-    if not CognitiveAssessmentModel:
-        logger.error("❌ CognitiveAssessmentModel not available")
-        return False
+    Returns:
+        tuple: (model, scaler, selector, feature_names) or (None, None, None, None) if failed
+    """
+    global cognitive_model, feature_names, model_scaler, model_selector
     
     try:
-        logger.info("🚀 Initializing Cognitive Assessment Model...")
+        # Get the project root directory (parent of backend/)
+        # This file is in backend/app.py, so go up one level to get project root
+        current_file = Path(__file__).resolve()
+        project_root = current_file.parent.parent  # Go up from backend/app.py to project root
+        bundle_path = project_root / 'model_bundle' / 'improved_regression_model'
         
-        # Train a focused model on required five acoustic features, with data-driven selection
-        cognitive_model, feature_names, best_name = train_five_feature_model()
-        if cognitive_model is None:
-            logger.error("❌ Failed to train five-feature model")
-            return False
-        logger.info("✅ Five-feature cognitive model trained successfully")
-        logger.info(f"📊 Features: {feature_names}")
-        logger.info(f"🏆 Best model: {best_name}")
+        logger.info("=" * 60)
+        logger.info("LOADING MODEL BUNDLE")
+        logger.info("=" * 60)
+        logger.info(f"Current file: {current_file}")
+        logger.info(f"Project root: {project_root}")
+        logger.info(f"Bundle path: {bundle_path}")
+        logger.info(f"Bundle path exists: {bundle_path.exists()}")
         
-        # Initialize Vietnamese transcriber
-        if VietnameseTranscriber:
-            try:
-                logger.info("🎤 Initializing Vietnamese Transcriber...")
-                vietnamese_transcriber = VietnameseTranscriber()
-                logger.info("✅ Vietnamese Transcriber initialized successfully")
-            except Exception as e:
-                logger.warning(f"⚠️ Failed to initialize Vietnamese Transcriber: {e}")
-                logger.info("ℹ️ Will use fallback transcription method")
-                vietnamese_transcriber = None
-        else:
-            logger.warning("⚠️ VietnameseTranscriber class not available")
-            vietnamese_transcriber = None
+        # Check if bundle exists
+        if not bundle_path.exists():
+            logger.error(f"Model bundle not found at {bundle_path}")
+            logger.error(f"Absolute path: {bundle_path.resolve()}")
+            logger.error("Please ensure model bundle exists or train a new model")
+            return None, None, None, None
         
-        return True
+        # Check required files
+        required_files = ['model.pkl', 'scaler.pkl', 'selector.pkl', 'feature_names.pkl']
+        for file in required_files:
+            file_path = bundle_path / file
+            if not file_path.exists():
+                logger.error(f"Required file not found: {file_path}")
+                return None, None, None, None
+        
+        # Load model components
+        logger.info("Loading model components...")
+        model = joblib.load(bundle_path / 'model.pkl')
+        scaler = joblib.load(bundle_path / 'scaler.pkl')
+        selector = joblib.load(bundle_path / 'selector.pkl')
+        feature_names = joblib.load(bundle_path / 'feature_names.pkl')
+        
+        # Load metadata if available
+        metadata_path = bundle_path / 'metadata.json'
+        if metadata_path.exists():
+            with open(metadata_path, 'r') as f:
+                metadata = json.load(f)
+            logger.info(f"Model metadata: {metadata.get('model_name', 'N/A')} v{metadata.get('version', 'N/A')}")
+            logger.info(f"Training date: {metadata.get('training_date', 'N/A')}")
+        
+        # Store in global variables
+        cognitive_model = model
+        model_scaler = scaler
+        model_selector = selector
+        
+        logger.info("=" * 60)
+        logger.info("MODEL BUNDLE LOADED SUCCESSFULLY")
+        logger.info("=" * 60)
+        logger.info(f"Model type: {type(model).__name__}")
+        logger.info(f"Features ({len(feature_names)}): {feature_names}")
+        logger.info(f"Scaler type: {type(scaler).__name__}")
+        logger.info(f"Selector type: {type(selector).__name__}")
+        logger.info("=" * 60)
+        
+        return model, scaler, selector, feature_names
         
     except Exception as e:
-        logger.error(f"❌ Failed to initialize model: {e}")
-        return False
+        logger.error("=" * 60)
+        logger.error("FAILED TO LOAD MODEL BUNDLE")
+        logger.error("=" * 60)
+        logger.error(f"Error: {e}")
+        logger.error("=" * 60)
+        import traceback
+        logger.error(traceback.format_exc())
+        return None, None, None, None
+
+def initialize_model():
+    """Initialize cognitive assessment model with error handling"""
+    global cognitive_model, feature_names, vietnamese_transcriber, model_scaler, model_selector
+    
+    # PRIORITY: Load model bundle first
+    model, scaler, selector, fnames = load_model_bundle()
+    
+    if model is None:
+        logger.error("Failed to load model bundle")
+        logger.warning("Falling back to training new model (not recommended)")
+        
+        # Fallback: Try to train new model (legacy behavior)
+        if CognitiveAssessmentModel:
+            try:
+                logger.info("Attempting to train new model...")
+                cognitive_model, feature_names, best_name = train_five_feature_model()
+                if cognitive_model is None:
+                    logger.error("Failed to train five-feature model")
+                    return False
+                logger.info("Five-feature cognitive model trained successfully")
+                logger.info(f"Features: {feature_names}")
+                logger.info(f"Best model: {best_name}")
+            except Exception as e:
+                logger.error(f"Failed to train model: {e}")
+                return False
+        else:
+            logger.error("CognitiveAssessmentModel not available")
+            return False
+    else:
+        # Model bundle loaded successfully
+        cognitive_model = model
+        model_scaler = scaler
+        model_selector = selector
+        feature_names = fnames
+    
+    # Initialize Vietnamese transcriber
+    if VietnameseTranscriber:
+        try:
+            logger.info("Initializing Vietnamese Transcriber...")
+            vietnamese_transcriber = VietnameseTranscriber()
+            logger.info("Vietnamese Transcriber initialized successfully")
+        except Exception as e:
+            logger.warning(f"Failed to initialize Vietnamese Transcriber: {e}")
+            logger.info("Will use fallback transcription method")
+            vietnamese_transcriber = None
+    else:
+        logger.warning("VietnameseTranscriber class not available")
+        vietnamese_transcriber = None
+    
+    return True
 
 def extract_audio_features(audio_path: str) -> dict:
     """Extract acoustic features including required metrics: speech_rate, number of utterances, avg pause, avg pitch, avg energy"""
@@ -1897,89 +2000,243 @@ def train_five_feature_model() -> Tuple[Optional[object], List[str], str]:
         pass
     return best_model, feature_order, best_name
 
+# =============================================================================
+# VALIDATION FUNCTIONS (PRIORITY 4)
+# =============================================================================
+
+def validate_features(audio_features: dict, required_features: list) -> bool:
+    """
+    Validate that all required features exist and are valid
+    
+    Args:
+        audio_features: Dictionary of extracted features
+        required_features: List of required feature names
+        
+    Returns:
+        bool: True if all features are valid
+        
+    Raises:
+        ValueError: If features are missing or invalid
+    """
+    missing = []
+    invalid = []
+    
+    for feat in required_features:
+        if feat not in audio_features:
+            missing.append(feat)
+        else:
+            val = audio_features[feat]
+            if val is None or np.isnan(val) or np.isinf(val):
+                invalid.append(feat)
+    
+    if missing:
+        error_msg = f"Missing required features: {missing}"
+        logger.error(error_msg)
+        raise ValueError(error_msg)
+    
+    if invalid:
+        error_msg = f"Invalid feature values (NaN/Inf): {invalid}"
+        logger.error(error_msg)
+        raise ValueError(error_msg)
+    
+    logger.info(f"Feature validation passed: {list(audio_features.keys())}")
+    return True
+
+def validate_feature_ranges(features: dict) -> None:
+    """
+    Validate feature value ranges and log warnings for out-of-range values
+    
+    Args:
+        features: Dictionary of feature values
+    """
+    ranges = {
+        'speech_rate': (0.5, 5.0),
+        'number_utterances': (1, 500),
+        'silence_mean': (0, 10),
+        'pitch_mean': (50, 500)
+    }
+    
+    for feat, (min_val, max_val) in ranges.items():
+        if feat in features:
+            val = features[feat]
+            if val < min_val or val > max_val:
+                logger.warning(f"Feature {feat} = {val} outside expected range [{min_val}, {max_val}]")
+
+def validate_prediction(prediction: float) -> float:
+    """
+    Validate model output prediction
+    
+    Args:
+        prediction: Raw prediction value
+        
+    Returns:
+        float: Validated and clipped prediction (0-30)
+        
+    Raises:
+        ValueError: If prediction is NaN or Inf
+    """
+    if np.isnan(prediction) or np.isinf(prediction):
+        error_msg = f"Invalid prediction value: {prediction}"
+        logger.error(error_msg)
+        raise ValueError(error_msg)
+    
+    # Clip to valid MMSE range
+    if prediction < 0 or prediction > 30:
+        logger.warning(f"Prediction {prediction:.2f} out of MMSE range [0, 30], clipping")
+        prediction = np.clip(prediction, 0.0, 30.0)
+    
+    return float(prediction)
+
+def prepare_feature_vector(audio_features: dict, feature_names: list) -> np.ndarray:
+    """
+    Prepare feature vector in correct order with validation
+    
+    Args:
+        audio_features: Dictionary of extracted features
+        feature_names: List of feature names in correct order
+        
+    Returns:
+        np.ndarray: Feature vector shaped (1, n_features)
+        
+    Raises:
+        ValueError: If features are missing or invalid
+    """
+    # Validate first
+    validate_features(audio_features, feature_names)
+    
+    # Validate ranges (warning only)
+    validate_feature_ranges(audio_features)
+    
+    # Build vector in correct order
+    feature_vector = [audio_features[name] for name in feature_names]
+    
+    logger.info(f"Feature vector prepared: {dict(zip(feature_names, feature_vector))}")
+    return np.array(feature_vector).reshape(1, -1)
+
+# =============================================================================
+# PREDICTION FUNCTION (PRIORITY 3, 5)
+# =============================================================================
+
 def predict_cognitive_score(audio_features: dict) -> dict:
-    """Predict cognitive score using ML model"""
+    """
+    Predict cognitive score using ML model with proper preprocessing pipeline
+    
+    Pipeline: Extract → Validate → Select → Scale → Predict → Validate output
+    
+    Args:
+        audio_features: Dictionary of extracted audio features
+        
+    Returns:
+        dict: Prediction result with score, confidence, and metadata
+        
+    Raises:
+        ValueError: If model not loaded, features invalid, or prediction fails
+    """
+    global cognitive_model, feature_names, model_scaler, model_selector
+    
+    logger.info("=" * 60)
+    logger.info("ML PREDICTION PIPELINE")
+    logger.info("=" * 60)
+    
+    # PRIORITY 5: Fail fast if model not loaded - NO DEFAULT VALUES
     if not cognitive_model or not feature_names:
-        logger.warning("⚠️ ML model not available")
-        return {
-            'predicted_score': 5.0,
-            'confidence': 0.5,
-            'model_used': 'default'
-        }
+        error_msg = "ML model not loaded. Please check server logs and ensure model bundle exists."
+        logger.error(error_msg)
+        raise ValueError(error_msg)
+    
+    # Check scaler and selector are loaded - if not, try to reload model bundle
+    if model_scaler is None or model_selector is None:
+        logger.warning("Model scaler or selector not loaded. Attempting to reload model bundle...")
+        try:
+            model, scaler, selector, fnames = load_model_bundle()
+            if model is not None and scaler is not None:
+                cognitive_model = model
+                model_scaler = scaler
+                model_selector = selector
+                feature_names = fnames
+                logger.info("Model bundle reloaded successfully")
+            else:
+                error_msg = "Scaler not loaded. Model bundle may be incomplete. Please check server startup logs."
+                logger.error(error_msg)
+                logger.error(f"Debug: cognitive_model={cognitive_model is not None}, feature_names={feature_names}, model_scaler={model_scaler is not None}, model_selector={model_selector is not None}")
+                raise ValueError(error_msg)
+        except Exception as e:
+            error_msg = f"Failed to reload model bundle: {e}. Scaler not loaded. Model bundle may be incomplete."
+            logger.error(error_msg)
+            logger.error(f"Debug: cognitive_model={cognitive_model is not None}, feature_names={feature_names}, model_scaler={model_scaler is not None}, model_selector={model_selector is not None}")
+            raise ValueError(error_msg)
     
     try:
-        # Prepare features for prediction
-        feature_vector = []
-        for feature_name in feature_names:
-            if feature_name in audio_features:
-                feature_vector.append(audio_features[feature_name])
+        # Step 1: Prepare feature vector with validation
+        logger.info("Step 1: Preparing feature vector...")
+        logger.info(f"Input features: {audio_features}")
+        feature_vector = prepare_feature_vector(audio_features, feature_names)
+        logger.info(f"Feature vector shape: {feature_vector.shape}")
+        logger.info(f"Feature vector values: {feature_vector[0]}")
+        
+        # Step 2: Apply feature selector if exists
+        processed_vector = feature_vector
+        if model_selector is not None:
+            logger.info("Step 2: Applying feature selector...")
+            processed_vector = model_selector.transform(processed_vector)
+            logger.info(f"After selector shape: {processed_vector.shape}")
+            logger.info(f"After selector values: {processed_vector[0]}")
+        else:
+            logger.warning("No feature selector available, skipping selection step")
+        
+        # Step 3: Apply scaler (REQUIRED - already checked above)
+        if model_scaler is not None:
+            logger.info("Step 3: Applying scaler...")
+            processed_vector = model_scaler.transform(processed_vector)
+            logger.info(f"After scaling shape: {processed_vector.shape}")
+            logger.info(f"After scaling values: {processed_vector[0]}")
+        else:
+            error_msg = "Scaler not loaded. Model bundle may be incomplete."
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+        
+        # Step 4: Make prediction
+        logger.info("Step 4: Making prediction...")
+        raw_prediction = cognitive_model.predict(processed_vector)
+        
+        # Handle different prediction output formats
+        if isinstance(raw_prediction, np.ndarray):
+            if len(raw_prediction.shape) > 0:
+                predicted_score = float(raw_prediction[0])
             else:
-                feature_vector.append(0.0)  # Default value
-        
-        # Make prediction - use unified 2-tier model interface
-        if hasattr(cognitive_model, 'predict_mmse'):
-            # Use new unified model interface
-            features_dict = dict(zip(feature_names, feature_vector))
-            prediction_result = cognitive_model.predict_mmse(features_dict)
-            predicted_score = prediction_result['tier2_mmse_prediction']
-            screening_probability = prediction_result['tier1_screening_probability']
-            needs_attention = prediction_result['needs_clinical_attention']
-
-            # Log clinical insights
-            logger.info(f"🔍 Clinical screening: Probability={screening_probability:.2f}, Needs attention={needs_attention}")
-            logger.info(f"📊 MMSE prediction: {predicted_score:.2f} (confidence: {prediction_result['tier2_confidence']:.2f})")
-
-        elif hasattr(cognitive_model, 'predict'):
-            # Legacy model support
-            prediction = cognitive_model.predict([feature_vector])
-            predicted_score = float(prediction[0]) if hasattr(prediction, '__getitem__') else float(prediction)
-            screening_probability = None
-            needs_attention = None
-
-        elif hasattr(cognitive_model, 'predict_score'):
-            # Alternative legacy interface
-            predicted_score = float(cognitive_model.predict_score([feature_vector]))
-            screening_probability = None
-            needs_attention = None
-
+                predicted_score = float(raw_prediction)
         else:
-            # Fallback: use audio features to estimate score
-            predicted_score = 5.0 + (audio_features.get('pitch_mean', 200) / 100) + (audio_features.get('speech_rate', 2.0) * 0.5)
-            predicted_score = max(1.0, min(10.0, predicted_score))
-            screening_probability = None
-            needs_attention = None
+            predicted_score = float(raw_prediction)
         
-        # Ensure MMSE score stays within valid range (0-30)
-        predicted_score = max(0.0, min(30.0, predicted_score))
+        logger.info(f"Raw prediction: {predicted_score:.4f}")
         
-        # Additional safety check for MMSE scores - enforce strict 30 limit
-        if predicted_score > 30.0:
-            logger.warning(f"⚠️ MMSE score {predicted_score} exceeds maximum 30, capping to 30.0")
-            predicted_score = 30.0
+        # Step 5: Validate prediction output
+        logger.info("Step 5: Validating prediction...")
+        predicted_score = validate_prediction(predicted_score)
+        logger.info(f"Validated prediction: {predicted_score:.2f}")
         
-        # Validate predicted_score to ensure no NaN/Inf
-        if np.isnan(predicted_score) or np.isinf(predicted_score):
-            logger.warning(f"⚠️ Invalid predicted_score: {predicted_score}, using fallback")
-            predicted_score = 5.0
-        
-        # Calculate confidence
+        # Step 6: Calculate confidence (if available)
+        confidence = 0.85  # Default confidence for regression models
         if hasattr(cognitive_model, 'predict_proba'):
-            confidence = cognitive_model.predict_proba([feature_vector])[0].max()
-        elif hasattr(cognitive_model, 'predict_confidence'):
-            confidence = float(cognitive_model.predict_confidence([feature_vector]))
-        else:
-            # Fallback confidence based on audio quality
-            confidence = min(0.9, audio_features.get('speech_rate', 2.0) * 0.2 + 0.3)
-        
-        # Validate confidence to ensure no NaN/Inf
-        if np.isnan(confidence) or np.isinf(confidence):
-            logger.warning(f"⚠️ Invalid confidence: {confidence}, using fallback")
-            confidence = 0.5
+            try:
+                proba = cognitive_model.predict_proba(processed_vector)
+                if proba is not None and len(proba) > 0:
+                    confidence = float(np.max(proba[0]))
+            except Exception as e:
+                logger.warning(f"Could not calculate probability-based confidence: {e}")
         
         # Get model name
-        model_name = getattr(cognitive_model, 'best_model_name', 'unknown')
-        if not model_name or model_name == 'unknown':
-            model_name = getattr(cognitive_model, '__class__.__name__', 'fallback_model')
+        model_name = getattr(cognitive_model, 'best_model_name', None)
+        if not model_name:
+            model_name = type(cognitive_model).__name__
+        
+        logger.info("=" * 60)
+        logger.info("PREDICTION COMPLETE")
+        logger.info("=" * 60)
+        logger.info(f"Predicted MMSE: {predicted_score:.2f}/30")
+        logger.info(f"Confidence: {confidence:.2f}")
+        logger.info(f"Model: {model_name}")
+        logger.info("=" * 60)
         
         result = {
             'predicted_score': predicted_score,
@@ -1987,29 +2244,23 @@ def predict_cognitive_score(audio_features: dict) -> dict:
             'model_used': model_name
         }
         
-        # Add clinical insights if available
-        if screening_probability is not None:
-            result.update({
-                'tier1_screening_probability': screening_probability,
-                'needs_clinical_attention': needs_attention,
-                'tier2_confidence': prediction_result.get('tier2_confidence', confidence),
-                'clinical_insights': {
-                    'screening_probability': screening_probability,
-                    'needs_attention': needs_attention,
-                    'cognitive_level': prediction_result.get('tier2_class_prediction', 'unknown')
-                }
-            })
-        
-        logger.info(f"✅ ML prediction successful: {result}")
         return result
         
+    except ValueError as e:
+        # Re-raise validation errors
+        logger.error(f"Validation error in prediction: {e}")
+        raise
     except Exception as e:
-        logger.error(f"❌ ML prediction failed: {e}")
-        return {
-            'predicted_score': 5.0,
-            'confidence': 0.5,
-            'model_used': 'error_fallback'
-        }
+        # Log full error details
+        logger.error("=" * 60)
+        logger.error("PREDICTION FAILED")
+        logger.error("=" * 60)
+        logger.error(f"Error: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        logger.error("=" * 60)
+        # PRIORITY 5: Raise error instead of returning default
+        raise RuntimeError(f"Prediction failed: {str(e)}") from e
 
 def transcribe_audio(audio_path: str, question: str = None) -> dict:
     """Transcribe audio using Vietnamese transcriber (Gemini-first)."""
@@ -3808,16 +4059,34 @@ queue_thread = threading.Thread(target=queue_worker, daemon=True, name='queue_wo
 queue_thread.start()
 logger.info("🎯 Queue worker thread started")
 
-# Initialize models when app is imported
+# Initialize models when app is imported (PRIORITY 7)
 try:
-    logger.info("🚀 Auto-initializing models...")
+    logger.info("=" * 60)
+    logger.info("STARTING APPLICATION")
+    logger.info("=" * 60)
+    logger.info("Auto-initializing models...")
+    
     if initialize_model():
-        logger.info("✅ Models initialized successfully")
+        logger.info("=" * 60)
+        logger.info("MODELS INITIALIZED SUCCESSFULLY")
+        logger.info("=" * 60)
     else:
-        logger.warning("⚠️ Model initialization failed, but app will continue with fallbacks")
+        logger.error("=" * 60)
+        logger.error("MODEL INITIALIZATION FAILED")
+        logger.error("=" * 60)
+        logger.error("Server starting without ML capabilities")
+        logger.error("Some endpoints may not work properly")
+        logger.error("=" * 60)
 except Exception as e:
-    logger.error(f"❌ Auto-initialization failed: {e}")
-    logger.info("ℹ️ App will continue with limited functionality")
+    logger.error("=" * 60)
+    logger.error("AUTO-INITIALIZATION FAILED")
+    logger.error("=" * 60)
+    logger.error(f"Error: {e}")
+    import traceback
+    logger.error(traceback.format_exc())
+    logger.error("=" * 60)
+    logger.error("App will continue with limited functionality")
+    logger.error("=" * 60)
 
 # New API endpoints for queued assessments
 @app.route('/api/assess-queue', methods=['POST'])

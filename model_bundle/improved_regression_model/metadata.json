@@ -1,6 +1,12 @@
 {
-  "model_name": "rf",
-  "training_date": "2025-09-14T19:09:45.708709",
-  "version": "3.0_improved",
-  "description": "Improved regression model for MMSE prediction"
+  "model_name": "gb",
+  "training_date": "2025-11-30T21:46:40.285845",
+  "version": "4.0_audio_features",
+  "description": "Model trained with 4 audio features: speech_rate, number_utterances, silence_mean, pitch_mean",
+  "features": [
+    "speech_rate",
+    "number_utterances",
+    "silence_mean",
+    "pitch_mean"
+  ]
 }
