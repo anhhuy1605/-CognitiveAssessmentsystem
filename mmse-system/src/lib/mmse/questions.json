@@ -1,0 +1,169 @@
+[
+  {
+    "domain": "orientation",
+    "domain_description": "Định hướng thời gian và không gian",
+    "max_domain_points": 10,
+    "questions": [
+      {
+        "id": "O1",
+        "question_text": "Chào {greeting}, hãy cho Cá Vàng biết hôm nay là ngày mấy, tháng mấy, năm mấy nhé?",
+        "answer_type": "date_complete",
+        "points": 5,
+        "scoring_criteria": "Ngày(1) + Tháng(1) + Năm(1) + Thứ(1) + Buổi trong ngày(1)",
+        "sample_correct": "Hôm nay là thứ hai, ngày 14 tháng 9 năm 2025, buổi sáng",
+        "sample_incorrect": "Ngày 14 tháng 9" 
+      },
+      {
+        "id": "O2", 
+        "question_text": "Bây giờ hãy cho Cá Vàng biết {greeting} đang ở quốc gia nào, thành phố nào, quận/huyện nào, và địa điểm cụ thể nào nhé?",
+        "answer_type": "location_hierarchical",
+        "points": 5,
+        "scoring_criteria": "Quốc gia(1) + Tỉnh/TP(1) + Quận/huyện(1) + Phường/xã(1) + Địa điểm cụ thể(1)",
+        "sample_correct": "Việt Nam, Hà Nội, quận Hoàn Kiếm, phường Hàng Bông, tại nhà riêng",
+        "sample_incorrect": "Ở Hà Nội"
+      }
+    ]
+  },
+  {
+    "domain": "registration", 
+    "domain_description": "Ghi nhận - khả năng tiếp nhận thông tin mới",
+    "max_domain_points": 3,
+    "questions": [
+      {
+        "id": "R1",
+        "question_text": "Thưa {greeting}, Cá Vàng sẽ nói 3 từ, hãy lắng nghe và nhắc lại ngay: 'Chanh', 'Chìa khóa', 'Bóng đèn'.",
+        "answer_type": "immediate_recall",
+        "points": 3,
+        "scoring_criteria": "Mỗi từ chính xác hoặc tương đồng ≥80% = 1 điểm",
+        "sample_correct": "Chanh, chìa khóa, bóng đèn",
+        "sample_incorrect": "Chanh, chìa, đèn",
+        "note": "Có thể lặp lại tối đa 3 lần cho đến khi bệnh nhân nhắc được cả 3 từ"
+      }
+    ]
+  },
+  {
+    "domain": "attention_calculation",
+    "domain_description": "Chú ý và khả năng tính toán",  
+    "max_domain_points": 5,
+    "questions": [
+      {
+        "id": "AC1",
+        "question_text": "Thưa {greeting}, hãy tính từ 100, mỗi lần trừ đi 7. Hãy nói từng kết quả: 100 trừ 7 bằng bao nhiêu? Tiếp tục trừ 7 từ kết quả đó, làm như vậy 5 lần.",
+        "answer_type": "serial_subtraction",
+        "points": 5,
+        "scoring_criteria": "Mỗi phép tính đúng = 1 điểm (cho phép sai số ±1)",
+        "sample_correct": "93, 86, 79, 72, 65",
+        "sample_incorrect": "93, 86, 80, 73, 66",
+        "alternative": {
+          "question_text": "Nếu không thể tính toán, hãy đánh vần ngược từ 'THĂNG LONG'",
+          "scoring_criteria": "G-N-O-L-G-N-A-H-T (mỗi chữ đúng vị trí = 1 điểm, tối đa 5)"
+        }
+      }
+    ]
+  },
+  {
+    "domain": "recall",
+    "domain_description": "Trí nhớ - khả năng hồi tưởng",
+    "max_domain_points": 3, 
+    "questions": [
+      {
+        "id": "RC1",
+        "question_text": "Bây giờ, thưa {greeting}, hãy nhắc lại 3 từ mà Cá Vàng đã nói ở đầu cuộc trò chuyện nhé?",
+        "answer_type": "delayed_recall",
+        "points": 3,
+        "scoring_criteria": "Mỗi từ nhớ chính xác = 1 điểm (Chanh, Chìa khóa, Bóng đèn)",
+        "sample_correct": "Chanh, chìa khóa, bóng đèn",
+        "note": "Không được gợi ý. Nếu không nhớ, có thể đưa gợi ý danh mục để phân biệt với bệnh lý khác"
+      }
+    ]
+  },
+  {
+    "domain": "language",
+    "domain_description": "Ngôn ngữ - khả năng đặt tên, lặp lại, hiểu và thực hiện lệnh",
+    "max_domain_points": 8,
+    "questions": [
+      {
+        "id": "L1",
+        "question_text": "Thưa {greeting}, hãy cho Cá Vàng biết đồ vật này gọi là gì: 'Cái dùng để viết, có mực bên trong'?",
+        "answer_type": "naming",
+        "points": 1,
+        "scoring_criteria": "Đặt tên chính xác đối tượng = 1 điểm",
+        "sample_correct": "Bút",
+        "sample_incorrect": "Cái để viết"
+      },
+      {
+        "id": "L2", 
+        "question_text": "Tiếp theo, đồ vật này: 'Cái tròn, đeo tay, dùng để xem giờ'?",
+        "answer_type": "naming", 
+        "points": 1,
+        "scoring_criteria": "Đặt tên chính xác = 1 điểm",
+        "sample_correct": "Đồng hồ",
+        "sample_incorrect": "Cái xem giờ"
+      },
+      {
+        "id": "L3",
+        "question_text": "Thưa {greeting}, hãy lặp lại chính xác câu này: 'Không có gì, không có nhưng, không có nếu'.",
+        "answer_type": "repetition",
+        "points": 1, 
+        "scoring_criteria": "Lặp lại chính xác hoàn toàn = 1 điểm",
+        "sample_correct": "Không có gì, không có nhưng, không có nếu",
+        "note": "Câu này khó phát âm, kiểm tra khả năng lặp lại phức tạp"
+      },
+      {
+        "id": "L4",
+        "question_text": "Bây giờ, thưa {greeting}, hãy làm theo 3 việc mà Cá Vàng yêu cầu bằng cách NÓI: Một là nói 'Tôi hiểu rồi', hai là đếm từ 1 đến 3, ba là nói 'Hoàn thành'.",
+        "answer_type": "three_step_command",
+        "points": 3,
+        "scoring_criteria": "Mỗi bước thực hiện đúng thứ tự = 1 điểm",
+        "sample_correct": "Tôi hiểu rồi. Một, hai, ba. Hoàn thành.",
+        "note": "Kiểm tra khả năng hiểu và thực hiện lệnh phức tạp bằng lời nói"
+      },
+      {
+        "id": "L5",
+        "question_text": "Cuối cùng, thưa {greeting}, hãy nói một câu hoàn chỉnh có nghĩa về thời tiết hôm nay.",
+        "answer_type": "spontaneous_writing_verbal",
+        "points": 1,
+        "scoring_criteria": "Câu có chủ ngữ + vị ngữ + nghĩa rõ ràng = 1 điểm",
+        "sample_correct": "Hôm nay trời nắng đẹp",
+        "sample_incorrect": "Nắng"
+      }
+    ]
+  },
+  {
+    "domain": "visuospatial_construction", 
+    "domain_description": "Khả năng thị-không gian (chuyển đổi bằng lời nói)",
+    "max_domain_points": 1,
+    "questions": [
+      {
+        "id": "VS1",
+        "question_text": "Thưa {greeting}, Cá Vàng mô tả một hình: 'Hai hình vuông chồng lên nhau, một hình xoay 45 độ tạo thành hình sao 8 cánh'. Hãy mô tả lại bằng lời những gì {greeting} hình dung được.",
+        "answer_type": "visuospatial_description",
+        "points": 1,
+        "scoring_criteria": "Mô tả chính xác cấu trúc không gian hoặc nhận biết được hình sao/kim cương chồng = 1 điểm",
+        "sample_correct": "Hai hình vuông chồng nhau tạo thành hình sao tám cánh",
+        "sample_incorrect": "Hai hình vuông",
+        "note": "Thay thế cho việc vẽ hình trong MMSE chuẩn"
+      }
+    ]
+  },
+  {
+    "assessment_rules": {
+      "total_max_points": 30,
+      "scoring_method": "DOMAIN_COMPLETION_REQUIRED",
+      "individual_question_scores": "NOT_REPORTED_SEPARATELY", 
+      "final_score_only": "AFTER_ALL_DOMAINS_COMPLETE",
+      "classification": {
+        "24-30": "Nhận thức bình thường",
+        "18-23": "Suy giảm nhận thức nhẹ có thể có (MCI)", 
+        "10-17": "Suy giảm nhận thức trung bình",
+        "0-9": "Suy giảm nhận thức nặng"
+      },
+      "important_notes": [
+        "KHÔNG bao giờ đưa ra điểm riêng lẻ cho từng câu hỏi",
+        "CHỈ tính điểm tổng sau khi hoàn thành TẤT CẢ 6 lĩnh vực", 
+        "Phải hoàn thành đầy đủ mới có ý nghĩa chẩn đoán",
+        "Kết quả cần được bác sĩ xác nhận, không thay thế chẩn đoán y khoa"
+      ]
+    }
+  }
+]

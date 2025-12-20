@@ -2098,7 +2098,50 @@ export default function CognitiveAssessmentPage() {
   const computeFinalScores = useCallback((allResults: TestResult[]) => {
     // Check if MMSE assessment is completed
     if (!mmseAssessment.completed || mmseAssessment.totalScore === null) {
-      console.warn('🚫 Cannot compute final scores - MMSE assessment not completed');
+      // Fallback: Check if we have backend final_score from any result
+      const backendScores = allResults
+        .map(r => (r as any).backend_final_score)
+        .filter((v): v is number => typeof v === 'number' && !isNaN(v));
+      
+      if (backendScores.length > 0) {
+        // Use average of backend final_scores as fallback
+        const avgBackendScore = Math.round((backendScores.reduce((a, b) => a + b, 0) / backendScores.length) * 10) / 10;
+        const clampedScore = Math.min(30.0, Math.max(0.0, avgBackendScore));
+        
+        console.warn('⚠️ MMSE assessment not completed via domains, using backend final_score as fallback');
+        console.log(`📊 Backend final_score (fallback): ${clampedScore}/30`);
+        console.log(`🔍 Domain completion status:`, mmseAssessment.getProgress());
+        console.log(`🔍 Domain details:`, Object.entries(mmseAssessment.domains).map(([key, domain]) => ({
+          domain: key,
+          completed: domain.completed,
+          score: domain.currentScore,
+          maxScore: domain.maxScore
+        })));
+        
+        // Overall GPT: trung bình điểm overall_score (0-10) for reference only
+        const gptArr = allResults
+          .map(r => r.gpt_evaluation?.overall_score)
+          .filter((v): v is number => typeof v === 'number');
+        const overallGpt = gptArr.length ? Math.round((gptArr.reduce((a,b)=>a+b,0) / gptArr.length) * 10) / 10 : 0;
+        
+        return { 
+          finalMmse: clampedScore, 
+          overallGptScore: overallGpt,
+          isCompleted: false, // Mark as incomplete since domains not fully completed
+          cognitiveStatus: clampedScore >= 24 ? 'Bình thường' : 
+                          clampedScore >= 18 ? 'Suy giảm nhận thức nhẹ (MCI)' :
+                          clampedScore >= 10 ? 'Alzheimer nhẹ' : 'Alzheimer trung bình đến nặng'
+        };
+      }
+      
+      console.warn('🚫 Cannot compute final scores - MMSE assessment not completed and no backend final_score available');
+      console.log(`🔍 Domain completion status:`, mmseAssessment.getProgress());
+      console.log(`🔍 Domain details:`, Object.entries(mmseAssessment.domains).map(([key, domain]) => ({
+        domain: key,
+        completed: domain.completed,
+        score: domain.currentScore,
+        maxScore: domain.maxScore
+      })));
       return { 
         finalMmse: null, 
         overallGptScore: 0,
@@ -2716,6 +2759,8 @@ export default function CognitiveAssessmentPage() {
               description: `🤖 AI phân tích giọng nói: ${gptEval?.analysis || 'Không có mô tả'}\n\n⚠️ Đây chỉ là hỗ trợ AI, KHÔNG thay thế cho đánh giá MMSE chuẩn.`,
               confidence: (data.ml_prediction.confidence || 0.5) * 0.7 // Reduce confidence to emphasize it's support
             } : undefined,
+            // Backend final_score (if available)
+            backend_final_score: data.final_score !== undefined ? Math.min(30.0, Math.max(0.0, data.final_score)) : undefined,
             auto_transcription: {
               success: true,
               transcript: transcriptText,
