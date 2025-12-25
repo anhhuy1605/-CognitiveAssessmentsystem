@@ -1,0 +1,105 @@
+================================================================================
+COGNITIVE ASSESSMENT DATA SUMMARY REPORT
+================================================================================
+
+Data Directory: data
+Total Files: 5
+Valid Files: 5
+Total Samples: 516
+Max Features: 30
+
+FILE STATUS:
+----------------------------------------
+dx-mmse         : ✅ AVAILABLE
+task1           : ✅ AVAILABLE
+task2           : ✅ AVAILABLE
+task3           : ✅ AVAILABLE
+progression     : ✅ AVAILABLE
+
+DETAILED ANALYSIS:
+================================================================================
+
+📁 DX-MMSE
+----------------------------------------
+Shape: (237, 30)
+Columns: 30
+Sample columns: Unnamed: 0, id, sid, vis, age, gender, mmse, dur.mean, dur.sd, dur.median ... and 20 more
+Missing values: {'mmse': 1, 'dur.mean': 6, 'dur.sd': 6, 'dur.median': 6, 'srate.mean': 237, 'srate.sd': 237}
+
+📁 TASK1
+----------------------------------------
+Shape: (71, 2)
+Columns: 2
+Sample columns: ID, Dx
+
+📁 TASK2
+----------------------------------------
+Shape: (71, 2)
+Columns: 2
+Sample columns: ID, MMSE
+
+📁 TASK3
+----------------------------------------
+Shape: (32, 2)
+Columns: 2
+Sample columns: ID, Decline
+
+📁 PROGRESSION
+----------------------------------------
+Shape: (105, 20)
+Columns: 20
+Sample columns: Unnamed: 0, id, mms, mmse2, gender, age, dx1, dx2, probable, possible ... and 10 more
+Missing values: {'dx2': 21, 'probable': 26, 'possible': 18, 'filename': 3}
+
+VALIDATION RESULTS:
+================================================================================
+
+🔍 DX-MMSE
+----------------------------------------
+Valid: ✅ YES
+Warnings:
+  ⚠️ High missing values: {'srate.mean': 100.0, 'srate.sd': 100.0}
+Recommendations:
+  💡 Potential label columns: ['dx']
+  💡 Feature columns: 29
+
+🔍 TASK1
+----------------------------------------
+Valid: ✅ YES
+Recommendations:
+  💡 Potential label columns: ['Dx']
+  💡 Feature columns: 1
+
+🔍 TASK2
+----------------------------------------
+Valid: ✅ YES
+Warnings:
+  ⚠️ No obvious label columns found
+Recommendations:
+  💡 Feature columns: 2
+
+🔍 TASK3
+----------------------------------------
+Valid: ✅ YES
+Warnings:
+  ⚠️ No obvious label columns found
+Recommendations:
+  💡 Feature columns: 2
+
+🔍 PROGRESSION
+----------------------------------------
+Valid: ✅ YES
+Recommendations:
+  💡 Potential label columns: ['dx']
+  💡 Feature columns: 19
+
+OVERALL RECOMMENDATIONS:
+================================================================================
+1. Potential label columns: ['dx']
+2. Feature columns: 29
+3. Potential label columns: ['Dx']
+4. Feature columns: 1
+5. Feature columns: 2
+6. Feature columns: 2
+7. Potential label columns: ['dx']
+8. Feature columns: 19

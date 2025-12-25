@@ -2,13 +2,35 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import dynamic from "next/dynamic";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { ClerkLoaded, SignedIn, SignedOut, SignInButton, SignUpButton, useUser } from "@clerk/nextjs";
 import { Brain, CheckCircle, Fish, Shell, TrendingUp, Shield, Target, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import PersonalInfoForm from "@/components/PersonalInfoForm";
 import { motion } from "framer-motion";
+
+// Dynamically import Clerk components to avoid SSG issues
+const ClerkLoaded = dynamic(
+	() => import("@clerk/nextjs").then((mod) => mod.ClerkLoaded),
+	{ ssr: false }
+);
+const SignedIn = dynamic(
+	() => import("@clerk/nextjs").then((mod) => mod.SignedIn),
+	{ ssr: false }
+);
+const SignedOut = dynamic(
+	() => import("@clerk/nextjs").then((mod) => mod.SignedOut),
+	{ ssr: false }
+);
+const SignInButton = dynamic(
+	() => import("@clerk/nextjs").then((mod) => mod.SignInButton),
+	{ ssr: false }
+);
+const SignUpButton = dynamic(
+	() => import("@clerk/nextjs").then((mod) => mod.SignUpButton),
+	{ ssr: false }
+);
 
 interface UserState {
 	isLoggedIn: boolean;
@@ -23,23 +45,23 @@ export default function Home() {
 		userInfo: null,
 	});
 	const [showForm, setShowForm] = useState(false);
+	const [isClient, setIsClient] = useState(false);
 	const router = useRouter();
-	const { user, isLoaded } = useUser();
+
+	// Mark as client-side rendered
+	useEffect(() => {
+		setIsClient(true);
+	}, []);
 
 	useEffect(() => {
-		const logged = !!user;
-		setUserState((prev) => ({ ...prev, isLoggedIn: logged }));
-
 		// Only access localStorage on client side
 		if (typeof window !== 'undefined') {
 			try {
 				const completed = localStorage.getItem("profileCompleted") === "true";
 				setUserState((prev) => ({ ...prev, hasCompletedProfile: completed }));
-				// Auto-open form when logged in but not completed
-				if (logged && !completed) setShowForm(true);
 			} catch {}
 		}
-	}, [user, isLoaded]);
+	}, []);
 
 	const handleFormSuccess = () => {
 		setUserState((prev) => ({ ...prev, hasCompletedProfile: true }));
@@ -76,7 +98,22 @@ export default function Home() {
 			);
 		}
 
-		// Not logged in → show Clerk modal buttons; form will open after successful login
+		// Not logged in → show Clerk modal buttons (only on client side)
+		if (!isClient) {
+			return (
+				<div className="flex flex-col gap-y-2">
+					<Button
+						size="default"
+						variant="secondary"
+						className="w-full bg-gradient-to-r from-yellow-400 via-orange-400 to-yellow-500 text-white font-bold shadow-xl backdrop-blur-md border-0 text-xs py-2"
+						disabled
+					>
+						Đang tải...
+					</Button>
+				</div>
+			);
+		}
+
 		return (
 			<ClerkLoaded>
 				<SignedOut>
