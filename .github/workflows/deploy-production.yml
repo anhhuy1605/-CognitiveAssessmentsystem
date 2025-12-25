@@ -230,11 +230,13 @@ jobs:
 
       # Health check
       - name: Wait for backend deployment
+        if: ${{ secrets.BACKEND_URL != '' }}
         run: |
           echo "Waiting for backend to be ready..."
           timeout 300 bash -c 'while ! curl -f ${{ secrets.BACKEND_URL }}/api/health; do sleep 10; done' || true
 
       - name: Backend health check
+        if: ${{ secrets.BACKEND_URL != '' }}
         run: |
           if curl -f ${{ secrets.BACKEND_URL }}/api/health; then
             echo "✅ Backend is healthy"
@@ -242,6 +244,10 @@ jobs:
             echo "❌ Backend health check failed"
             exit 1
           fi
+
+      - name: Skip health check (no URL)
+        if: ${{ secrets.BACKEND_URL == '' }}
+        run: echo "⚠️ BACKEND_URL not configured. Skipping health check."
 
   # ================================
   # Deploy Frontend Job
@@ -266,19 +272,27 @@ jobs:
 
       # Deploy to Vercel
       - name: Setup Vercel CLI
+        if: ${{ env.VERCEL_TOKEN != '' }}
         run: npm install -g vercel
 
       - name: Pull Vercel environment information
+        if: ${{ env.VERCEL_TOKEN != '' }}
         run: vercel pull --yes --environment=production --token=${{ env.VERCEL_TOKEN }}
         working-directory: frontend
 
       - name: Build project artifacts
+        if: ${{ env.VERCEL_TOKEN != '' }}
         run: vercel build --prod --token=${{ env.VERCEL_TOKEN }}
         working-directory: frontend
 
       - name: Deploy project artifacts to Vercel
+        if: ${{ env.VERCEL_TOKEN != '' }}
         run: vercel deploy --prebuilt --prod --token=${{ env.VERCEL_TOKEN }}
         working-directory: frontend
+
+      - name: Skip Vercel deploy (no token)
+        if: ${{ env.VERCEL_TOKEN == '' }}
+        run: echo "⚠️ VERCEL_TOKEN not configured. Skipping Vercel deployment."
 
       # Alternative: Deploy to Netlify
       - name: Deploy to Netlify (fallback)
@@ -307,6 +321,7 @@ jobs:
 
       # Test backend API
       - name: Test backend API endpoints
+        if: ${{ secrets.BACKEND_URL != '' }}
         run: |
           # Test health endpoint
           curl -f ${{ secrets.BACKEND_URL }}/api/health || exit 1
@@ -318,6 +333,7 @@ jobs:
 
       # Test frontend accessibility
       - name: Test frontend accessibility
+        if: ${{ secrets.FRONTEND_URL != '' }}
         run: |
           # Test homepage
           curl -f ${{ secrets.FRONTEND_URL }} || exit 1
@@ -329,11 +345,16 @@ jobs:
 
       # Performance check
       - name: Performance check
+        if: ${{ secrets.BACKEND_URL != '' }}
         run: |
           URL="${{ secrets.BACKEND_URL }}/api/health"
           RT=$(curl -o /dev/null -s -w '%{time_total}' "$URL" || echo "fail")
           if [ "$RT" = "fail" ]; then echo "Error: request failed"; exit 1; fi
           awk -v t="$RT" 'BEGIN{ if (t+0>2.0) { printf("Warning: slow response %.2fs\n", t+0) } else { printf("OK: response %.2fs\n", t+0) } }'
+
+      - name: Skip tests (URLs not configured)
+        if: ${{ secrets.BACKEND_URL == '' || secrets.FRONTEND_URL == '' }}
+        run: echo "⚠️ BACKEND_URL or FRONTEND_URL not configured. Skipping post-deploy tests."
 
   # ================================
   # Notification Job
