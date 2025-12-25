@@ -141,7 +141,7 @@ jobs:
 
       - name: Create root role (compat)
         run: |
-          PGPASSWORD=postgres psql -h localhost -U postgres -d test_db -v ON_ERROR_STOP=1 -c "DO $$BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='root') THEN CREATE ROLE root WITH LOGIN SUPERUSER PASSWORD 'postgres'; END IF; END$$;"
+          PGPASSWORD=postgres psql -h localhost -U postgres -d test_db -v ON_ERROR_STOP=1 -c "DO \$\$BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='root') THEN CREATE ROLE root WITH LOGIN SUPERUSER PASSWORD 'postgres'; END IF; END\$\$;"
 
       # Build checks
       - name: Build frontend
