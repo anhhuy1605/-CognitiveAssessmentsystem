@@ -180,10 +180,14 @@ uploads/
 storage/
 recordings/
 text-records/
-results/
-reports/
+/results/
+/reports/
 artifacts/
 plots/
+
+# Keep frontend components results folder
+!frontend/components/results/
+!frontend/components/results/**
 
 # Cache directories
 .next/
