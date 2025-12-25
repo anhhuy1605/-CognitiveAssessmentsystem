@@ -153,6 +153,7 @@ interface TestResult {
   audio_features?: AudioFeatures;
   mmse_prediction?: MMSEPrediction;
   auto_transcription?: AutoTranscriptionResult;
+  backend_final_score?: number;
   // Legacy support
   o4mini_evaluation?: GPTEvaluation;
 }
