@@ -61,6 +61,19 @@ jobs:
           - 5432:5432
 
     steps:
+      - name: Free up disk space
+        run: |
+          echo "=== Disk space before cleanup ==="
+          df -h
+          # Remove unnecessary large packages
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force || true
+          echo "=== Disk space after cleanup ==="
+          df -h
+
       - name: Checkout code
         uses: actions/checkout@v4
         with:
@@ -113,7 +126,7 @@ jobs:
       - name: Install backend dependencies
         run: |
           cd backend
-          pip install -r requirements.txt
+          pip install --no-cache-dir -r requirements.txt
 
       - name: Run backend syntax check
         run: |
