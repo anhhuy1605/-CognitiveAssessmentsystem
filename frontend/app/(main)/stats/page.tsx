@@ -13,7 +13,7 @@ import Link from "next/link";
 import { MMSETrendChart } from "@/components/MMSETrendChart";
 import { useUser } from "@clerk/nextjs";
 import MmseLineChart from "@/components/charts/MmseLineChart";
-import DetailedResultCard from "@/components/results/DetailedResultCard";
+import DetailedResultCard from "@/components/results/DetailedResultCardNew";
 
 interface PersonalTestResult {
   id: number;
