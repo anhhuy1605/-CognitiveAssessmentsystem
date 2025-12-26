@@ -167,7 +167,7 @@ export default function CognitiveAssessmentPage() {
   const loadQuestions = async () => {
     try {
       // Try backend first
-      const response = await fetchWithFallback(`${API_BASE_URL}/api/questions/mmse-v2`);
+      const response = await fetchWithFallback(`${API_BASE_URL}/api/mmse/questions`);
       if (response.ok) {
         const data = await response.json();
         if (data.questions && Array.isArray(data.questions)) {
@@ -444,7 +444,7 @@ export default function CognitiveAssessmentPage() {
         completed_at: new Date().toISOString()
       };
       
-      await fetchWithFallback(`${API_BASE_URL}/api/save-assessment`, {
+      await fetchWithFallback(`${API_BASE_URL}/api/mmse/results/${sessionId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
