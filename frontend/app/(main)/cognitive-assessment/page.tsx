@@ -111,12 +111,12 @@ export default function CognitiveAssessmentPage() {
   
   // Results
   const [testResults, setTestResults] = useState<TestResult[]>([]);
-  const [sessionId] = useState(() => {
-    if (typeof window !== 'undefined') {
-      return `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    }
-    return 'session_placeholder';
-  });
+  const [sessionId, setSessionId] = useState('session_placeholder');
+
+  // Generate unique session ID on client side only
+  useEffect(() => {
+    setSessionId(`session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
+  }, []);
   
   // Backend
   const [backendStatus, setBackendStatus] = useState<'connected' | 'disconnected' | 'checking'>('checking');
