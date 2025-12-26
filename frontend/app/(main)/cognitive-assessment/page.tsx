@@ -426,10 +426,39 @@ export default function CognitiveAssessmentPage() {
     }
   };
   
-  // Save results to backend
+  // Save results to both Flask backend AND Next.js database
   const saveResults = async (results: TestResult[]) => {
     try {
-      const payload = {
+      // Calculate MMSE score based on results
+      const totalQuestions = results.length;
+      const answeredQuestions = results.filter(r => r.transcription).length;
+      const completionRate = totalQuestions > 0 ? (answeredQuestions / totalQuestions) * 100 : 0;
+      
+      // Calculate average GPT score if available
+      const gptScores = results
+        .filter(r => r.gpt_evaluation?.overall_score)
+        .map(r => r.gpt_evaluation!.overall_score);
+      const averageGptScore = gptScores.length > 0 
+        ? gptScores.reduce((a, b) => a + b, 0) / gptScores.length 
+        : 0;
+      
+      // Estimate MMSE score (scale GPT score 0-10 to MMSE 0-30)
+      const estimatedMmseScore = Math.round((averageGptScore / 10) * 30);
+      
+      // Prepare question results for database
+      const questionResults = results.map(r => ({
+        questionId: r.questionId,
+        questionText: r.question,
+        transcript: r.transcription || '',
+        duration: r.duration,
+        gptEvaluation: r.gpt_evaluation,
+        audioFeatures: r.audio_features,
+        status: r.transcription ? 'completed' : 'skipped',
+        processedAt: r.timestamp.toISOString()
+      }));
+
+      // 1. Save to Flask backend (for acoustic/linguistic analysis)
+      const flaskPayload = {
         session_id: sessionId,
         user_info: userInfo,
         results: results.map(r => ({
@@ -444,11 +473,59 @@ export default function CognitiveAssessmentPage() {
         completed_at: new Date().toISOString()
       };
       
-      await fetchWithFallback(`${API_BASE_URL}/api/mmse/results/${sessionId}`, {
+      // Save to Flask backend (don't await to not block)
+      fetchWithFallback(`${API_BASE_URL}/api/mmse/results/${sessionId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(flaskPayload)
+      }).catch(err => console.warn('Flask backend save warning:', err));
+
+      // 2. Save to Next.js database (PRIMARY - for results page)
+      const nextjsPayload = {
+        sessionId: sessionId,
+        userId: 'assessment_user',
+        userInfo: {
+          name: userInfo.name,
+          age: userInfo.age,
+          gender: userInfo.gender,
+          education_years: userInfo.education_years,
+          notes: userInfo.notes
+        },
+        startedAt: new Date(results[0]?.timestamp || Date.now()).toISOString(),
+        totalQuestions,
+        answeredQuestions,
+        completionRate,
+        memoryScore: 0,
+        cognitiveScore: 0,
+        finalMmseScore: estimatedMmseScore,
+        overallGptScore: averageGptScore,
+        questionResults: questionResults,
+        cognitiveAnalysis: {
+          overallAssessment: estimatedMmseScore >= 24 
+            ? 'Chức năng nhận thức bình thường' 
+            : estimatedMmseScore >= 18 
+            ? 'Suy giảm nhận thức nhẹ - cần theo dõi' 
+            : 'Suy giảm nhận thức đáng kể - khuyên nghị kiểm tra chuyên sâu',
+          riskLevel: estimatedMmseScore >= 24 ? 'low' : estimatedMmseScore >= 18 ? 'medium' : 'high'
+        },
+        usageMode: 'personal',
+        assessmentType: 'cognitive'
+      };
+
+      // Save to Next.js database (this is the primary storage for results page)
+      const response = await fetch('/api/save-cognitive-assessment-results', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(nextjsPayload)
       });
+      
+      const result = await response.json();
+      if (result.success) {
+        console.log('✅ Results saved to Next.js database:', result.id);
+      } else {
+        console.error('❌ Failed to save to Next.js database:', result.error);
+      }
+      
     } catch (error) {
       console.error('Error saving results:', error);
     }
