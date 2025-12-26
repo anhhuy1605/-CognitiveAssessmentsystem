@@ -1,0 +1,64 @@
+# Requirements for MCI Screening Modules
+# Install with: pip install -r requirements_modules.txt
+
+# ==============================================================================
+# ACOUSTIC ANALYSIS
+# ==============================================================================
+
+# openSMILE Python wrapper (eGeMAPS features)
+# Note: Requires openSMILE binary to be installed
+opensmile>=2.4.0
+
+# Praat Python wrapper (voice quality, F0 analysis)
+praat-parselmouth>=0.4.3
+
+# Audio processing
+librosa>=0.9.0
+soundfile>=0.11.0
+
+# Signal processing
+scipy>=1.7.0
+numpy>=1.21.0
+
+# ==============================================================================
+# LINGUISTIC ANALYSIS
+# ==============================================================================
+
+# Vietnamese NLP (optional - requires Java)
+# vncorenlp>=1.0.3
+# Note: VnCoreNLP requires Java 8+ and manual model download
+
+# Vietnamese NLP (alternative - pure Python)
+underthesea>=6.0.0
+
+# PhoBERT for semantic analysis
+transformers>=4.20.0
+torch>=1.10.0
+
+# ==============================================================================
+# MACHINE LEARNING
+# ==============================================================================
+
+# Core ML
+scikit-learn>=1.0.0
+pandas>=1.3.0
+
+# Model persistence
+joblib>=1.1.0
+
+# Optional: XGBoost for better predictions
+# xgboost>=1.5.0
+
+# ==============================================================================
+# UTILITIES
+# ==============================================================================
+
+# Progress bars
+tqdm>=4.60.0
+
+# Configuration
+pyyaml>=6.0
+
+# Logging
+colorlog>=6.0.0
+
