@@ -361,6 +361,29 @@ except ImportError as e:
     logger.warning(f"⚠️ Cannot import MMSE inference pipeline: {e}")
     mmse_pipeline = None
 
+# Import MCI Screening Modules
+mci_service = None
+try:
+    from modules.integration_service import MCIScreeningService, analyze_for_mci
+    from modules.acoustic_analyzer import AcousticAnalyzer
+    from modules.linguistic_analyzer import VietnameseLinguisticAnalyzer
+    from modules.mci_predictor import MCIPredictor
+    
+    # Initialize MCI service
+    mci_service = MCIScreeningService(use_phobert=True)
+    
+    logger.info("✅ MCI Screening Modules initialized")
+    logger.info(f"   - Acoustic Analyzer: {mci_service.acoustic_analyzer is not None}")
+    logger.info(f"   - Linguistic Analyzer: {mci_service.linguistic_analyzer is not None}")
+    logger.info(f"   - MCI Predictor: {mci_service.predictor is not None}")
+    
+except ImportError as e:
+    logger.warning(f"⚠️ MCI modules not available: {e}")
+    mci_service = None
+except Exception as e:
+    logger.error(f"❌ MCI service initialization error: {e}")
+    mci_service = None
+
 # Load environment variables
 def load_environment():
     """Load environment variables from multiple possible locations"""
@@ -2450,6 +2473,22 @@ def transcribe_audio(audio_path: str, question: str = None) -> dict:
 @app.route('/api/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
+    # Get MCI service status
+    mci_status = {}
+    if mci_service is not None:
+        try:
+            status = mci_service.get_status()
+            mci_status = {
+                'available': status.get('is_ready', False),
+                'acoustic_analyzer': status.get('acoustic_analyzer', False),
+                'linguistic_analyzer': status.get('linguistic_analyzer', False),
+                'mci_predictor': status.get('mci_predictor', False)
+            }
+        except:
+            mci_status = {'available': False, 'error': 'Status check failed'}
+    else:
+        mci_status = {'available': False}
+    
     return jsonify({
         'status': 'healthy',
         'timestamp': datetime.now().isoformat(),
@@ -2457,6 +2496,7 @@ def health_check():
         'feature_count': len(feature_names) if feature_names else 0,
         'model_bundle': str((Path(__file__).resolve().parent.parent / "models").resolve()),
         'mmse_pipeline_available': mmse_pipeline is not None,
+        'mci_service': mci_status,
         'gemini_available': bool(gemini_api_key),
         'openai_available': openai_client is not None,
         'transcriber_available': vietnamese_transcriber is not None,
@@ -2472,6 +2512,484 @@ def health_check():
             'node_env': os.getenv('NODE_ENV', 'development')
         }
     })
+
+# =============================================================================
+# MCI SCREENING ENDPOINTS
+# =============================================================================
+
+@app.route('/api/mci/status', methods=['GET'])
+def mci_status():
+    """
+    Get MCI screening module status
+    
+    Returns availability of each component:
+    - acoustic_analyzer: eGeMAPS + Vietnamese tone features
+    - linguistic_analyzer: Vietnamese NLP (PhoBERT)
+    - mci_predictor: MCI prediction and MMSE estimation
+    """
+    try:
+        if mci_service is None:
+            return jsonify({
+                'success': False,
+                'available': False,
+                'error': 'MCI modules not initialized',
+                'components': {
+                    'acoustic_analyzer': False,
+                    'linguistic_analyzer': False,
+                    'multimodal_fusion': False,
+                    'mci_predictor': False
+                }
+            })
+        
+        status = mci_service.get_status()
+        return jsonify({
+            'success': True,
+            'available': status.get('is_ready', False),
+            'components': {
+                'acoustic_analyzer': status.get('acoustic_analyzer', False),
+                'linguistic_analyzer': status.get('linguistic_analyzer', False),
+                'multimodal_fusion': status.get('multimodal_fusion', False),
+                'mci_predictor': status.get('mci_predictor', False)
+            },
+            'initialization_errors': status.get('initialization_errors', []),
+            'timestamp': datetime.now().isoformat()
+        })
+    except Exception as e:
+        logger.error(f"❌ MCI status check failed: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@app.route('/api/mci/analyze', methods=['POST'])
+def mci_analyze():
+    """
+    Complete MCI analysis from audio and/or transcript
+    
+    Request (multipart/form-data):
+        - audio: Audio file (WAV, MP3) - optional if transcript provided
+        - transcript: Text transcript - optional if audio provided
+        - task_type: Type of cognitive task (verbal_fluency, picture_description, 
+                     spontaneous_speech, qa) - optional
+        - user_name: User name - optional
+        - user_age: User age - optional
+        - user_gender: User gender - optional
+        - user_education: Education years - optional
+    
+    Returns:
+        - mci_probability: Probability of MCI (0-1)
+        - mmse_estimate: Estimated MMSE score (0-30)
+        - severity: Severity classification
+        - risk_factors: Identified risk factors
+        - recommendations: Clinical recommendations (Vietnamese)
+        - acoustic_features: Extracted acoustic features count
+        - linguistic_features: Extracted linguistic features count
+    """
+    try:
+        if mci_service is None:
+            return jsonify({
+                'success': False,
+                'error': 'MCI service not available. Please check module installation.'
+            }), 503
+        
+        # Get audio file if provided
+        audio_path = None
+        temp_audio_path = None
+        
+        if 'audio' in request.files:
+            audio_file = request.files['audio']
+            if audio_file.filename:
+                # Save to temp file
+                import tempfile
+                suffix = os.path.splitext(audio_file.filename)[1] or '.wav'
+                with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                    audio_file.save(tmp.name)
+                    temp_audio_path = tmp.name
+                    audio_path = tmp.name
+        
+        # Get transcript if provided
+        transcript = request.form.get('transcript', '')
+        
+        # Get task type
+        task_type = request.form.get('task_type', None)
+        
+        # Get user info
+        user_info = {
+            'name': request.form.get('user_name', ''),
+            'age': request.form.get('user_age', ''),
+            'gender': request.form.get('user_gender', ''),
+            'education': request.form.get('user_education', '')
+        }
+        
+        # Validate: need either audio or transcript
+        if not audio_path and not transcript:
+            return jsonify({
+                'success': False,
+                'error': 'Please provide either audio file or transcript'
+            }), 400
+        
+        logger.info(f"🧠 MCI Analysis request:")
+        logger.info(f"   Audio: {audio_path is not None}")
+        logger.info(f"   Transcript: {len(transcript)} chars")
+        logger.info(f"   Task type: {task_type}")
+        
+        # Run analysis
+        result = mci_service.analyze(
+            audio_path=audio_path,
+            transcript=transcript if transcript else None,
+            task_type=task_type,
+            user_info=user_info if any(user_info.values()) else None
+        )
+        
+        # Clean up temp file
+        if temp_audio_path and os.path.exists(temp_audio_path):
+            os.unlink(temp_audio_path)
+        
+        # Format response
+        response = {
+            'success': result.success,
+            'mci_probability': result.mci_prediction.get('mci_probability', 0) if result.mci_prediction else 0,
+            'mci_class': result.mci_prediction.get('mci_class', 'Unknown') if result.mci_prediction else 'Unknown',
+            'mmse_estimate': result.mmse_estimate,
+            'confidence': result.confidence,
+            'severity': result.severity,
+            'risk_factors': result.risk_factors,
+            'recommendations': result.recommendations,
+            'feature_summary': result.feature_summary,
+            'acoustic_feature_count': len(result.acoustic_features),
+            'linguistic_feature_count': len(result.linguistic_features),
+            'processing_time': result.processing_time,
+            'errors': result.errors,
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        return jsonify(response)
+        
+    except Exception as e:
+        logger.error(f"❌ MCI analysis failed: {e}")
+        import traceback
+        traceback.print_exc()
+        
+        # Clean up temp file on error
+        if 'temp_audio_path' in locals() and temp_audio_path and os.path.exists(temp_audio_path):
+            os.unlink(temp_audio_path)
+        
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'timestamp': datetime.now().isoformat()
+        }), 500
+
+
+@app.route('/api/mci/acoustic', methods=['POST'])
+def mci_acoustic_features():
+    """
+    Extract acoustic features only (without linguistic analysis)
+    
+    Request (multipart/form-data):
+        - audio: Audio file (WAV, MP3) - required
+        - transcript: Optional transcript for speaking rate calculation
+    
+    Returns:
+        - features: Dictionary of extracted acoustic features
+        - feature_count: Number of features extracted
+        - key_features: Most important features for MCI detection
+    """
+    try:
+        if mci_service is None or mci_service.acoustic_analyzer is None:
+            return jsonify({
+                'success': False,
+                'error': 'Acoustic analyzer not available'
+            }), 503
+        
+        # Get audio file
+        if 'audio' not in request.files:
+            return jsonify({
+                'success': False,
+                'error': 'Audio file required'
+            }), 400
+        
+        audio_file = request.files['audio']
+        transcript = request.form.get('transcript', None)
+        
+        # Save to temp file
+        import tempfile
+        suffix = os.path.splitext(audio_file.filename)[1] or '.wav'
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            audio_file.save(tmp.name)
+            temp_path = tmp.name
+        
+        try:
+            # Extract features
+            features = mci_service.acoustic_analyzer.extract_all_features(
+                temp_path, 
+                transcript=transcript
+            )
+            
+            # Get key features for summary
+            key_features = {
+                'f0_mean': features.get('f0_f0_mean', 0),
+                'f0_variability': features.get('f0_f0_cv', 0),
+                'jitter': features.get('vq_jitter_local', 0),
+                'shimmer': features.get('vq_shimmer_local', 0),
+                'hnr': features.get('vq_hnr_mean', 0),
+                'pause_rate': features.get('pause_pause_rate', 0),
+                'speaking_rate': features.get('rate_words_per_minute', 0),
+                'tone_flattening': features.get('tone_flattening_score', 0)
+            }
+            
+            return jsonify({
+                'success': True,
+                'features': features,
+                'feature_count': len(features),
+                'key_features': key_features,
+                'timestamp': datetime.now().isoformat()
+            })
+            
+        finally:
+            # Clean up temp file
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+        
+    except Exception as e:
+        logger.error(f"❌ Acoustic feature extraction failed: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@app.route('/api/mci/linguistic', methods=['POST'])
+def mci_linguistic_features():
+    """
+    Extract linguistic features only (without acoustic analysis)
+    
+    Request (JSON or form-data):
+        - transcript: Text transcript - required
+        - task_type: Type of cognitive task - optional
+    
+    Returns:
+        - features: Dictionary of extracted linguistic features
+        - feature_count: Number of features extracted
+        - key_features: Most important features for MCI detection
+    """
+    try:
+        if mci_service is None or mci_service.linguistic_analyzer is None:
+            return jsonify({
+                'success': False,
+                'error': 'Linguistic analyzer not available'
+            }), 503
+        
+        # Get transcript from JSON or form data
+        if request.is_json:
+            data = request.get_json()
+            transcript = data.get('transcript', '')
+            task_type = data.get('task_type', None)
+        else:
+            transcript = request.form.get('transcript', '')
+            task_type = request.form.get('task_type', None)
+        
+        if not transcript:
+            return jsonify({
+                'success': False,
+                'error': 'Transcript required'
+            }), 400
+        
+        # Extract features
+        features = mci_service.linguistic_analyzer.extract_all_features(
+            transcript,
+            task_type=task_type
+        )
+        
+        # Get key features for summary
+        key_features = {
+            'ttr': features.get('lex_ttr', 0),
+            'mattr': features.get('lex_mattr', 0),
+            'pronoun_ratio': features.get('lex_pronoun_ratio', 0),
+            'noun_ratio': features.get('lex_noun_ratio', 0),
+            'mlu_words': features.get('syn_mlu_words', 0),
+            'incomplete_sentences': features.get('syn_incomplete_sentence_ratio', 0),
+            'idea_density': features.get('sem_idea_density', 0),
+            'semantic_coherence': features.get('sem_semantic_coherence', 0),
+            'filler_ratio': features.get('vi_filler_ratio', 0)
+        }
+        
+        return jsonify({
+            'success': True,
+            'features': features,
+            'feature_count': len(features),
+            'key_features': key_features,
+            'transcript_length': len(transcript),
+            'word_count': features.get('lex_total_words', 0),
+            'timestamp': datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        logger.error(f"❌ Linguistic feature extraction failed: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@app.route('/api/mci/predict', methods=['POST'])
+def mci_predict():
+    """
+    Predict MCI status from pre-extracted features
+    
+    Request (JSON):
+        - features: Dictionary of extracted features (acoustic + linguistic)
+    
+    Returns:
+        - mci_probability: Probability of MCI (0-1)
+        - mmse_estimate: Estimated MMSE score (0-30)
+        - severity: Severity classification
+        - risk_factors: Identified risk factors
+        - recommendations: Clinical recommendations
+    """
+    try:
+        if mci_service is None or mci_service.predictor is None:
+            return jsonify({
+                'success': False,
+                'error': 'MCI predictor not available'
+            }), 503
+        
+        if not request.is_json:
+            return jsonify({
+                'success': False,
+                'error': 'JSON data required'
+            }), 400
+        
+        data = request.get_json()
+        features = data.get('features', {})
+        
+        if not features:
+            return jsonify({
+                'success': False,
+                'error': 'Features dictionary required'
+            }), 400
+        
+        # Run prediction
+        prediction = mci_service.predictor.predict(features)
+        
+        return jsonify({
+            'success': True,
+            'mci_probability': prediction.mci_probability,
+            'mci_class': prediction.mci_class,
+            'mmse_estimate': prediction.mmse_estimate,
+            'confidence': prediction.confidence,
+            'severity': prediction.severity,
+            'risk_factors': prediction.risk_factors,
+            'recommendations': prediction.recommendations,
+            'timestamp': datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        logger.error(f"❌ MCI prediction failed: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@app.route('/api/mci/batch-analyze', methods=['POST'])
+def mci_batch_analyze():
+    """
+    Batch analysis for multiple audio files
+    
+    Request (multipart/form-data):
+        - audio_files: Multiple audio files
+        - task_type: Type of cognitive task - optional
+    
+    Returns:
+        - results: List of analysis results for each file
+        - summary: Aggregate statistics
+    """
+    try:
+        if mci_service is None:
+            return jsonify({
+                'success': False,
+                'error': 'MCI service not available'
+            }), 503
+        
+        if 'audio_files' not in request.files:
+            return jsonify({
+                'success': False,
+                'error': 'audio_files required'
+            }), 400
+        
+        audio_files = request.files.getlist('audio_files')
+        task_type = request.form.get('task_type', None)
+        
+        results = []
+        temp_files = []
+        
+        try:
+            import tempfile
+            
+            for audio_file in audio_files:
+                # Save to temp file
+                suffix = os.path.splitext(audio_file.filename)[1] or '.wav'
+                with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                    audio_file.save(tmp.name)
+                    temp_files.append(tmp.name)
+                    
+                    # Analyze
+                    result = mci_service.analyze(
+                        audio_path=tmp.name,
+                        task_type=task_type
+                    )
+                    
+                    results.append({
+                        'filename': audio_file.filename,
+                        'success': result.success,
+                        'mci_probability': result.mci_prediction.get('mci_probability', 0) if result.mci_prediction else 0,
+                        'mmse_estimate': result.mmse_estimate,
+                        'severity': result.severity,
+                        'errors': result.errors
+                    })
+            
+            # Calculate summary
+            successful_results = [r for r in results if r['success']]
+            if successful_results:
+                avg_mci_prob = sum(r['mci_probability'] for r in successful_results) / len(successful_results)
+                avg_mmse = sum(r['mmse_estimate'] for r in successful_results) / len(successful_results)
+            else:
+                avg_mci_prob = 0
+                avg_mmse = 0
+            
+            return jsonify({
+                'success': True,
+                'total_files': len(audio_files),
+                'successful': len(successful_results),
+                'failed': len(results) - len(successful_results),
+                'results': results,
+                'summary': {
+                    'average_mci_probability': avg_mci_prob,
+                    'average_mmse_estimate': avg_mmse,
+                    'high_risk_count': sum(1 for r in successful_results if r['mci_probability'] > 0.7)
+                },
+                'timestamp': datetime.now().isoformat()
+            })
+            
+        finally:
+            # Clean up temp files
+            for temp_path in temp_files:
+                if os.path.exists(temp_path):
+                    os.unlink(temp_path)
+        
+    except Exception as e:
+        logger.error(f"❌ Batch analysis failed: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+# =============================================================================
+# USER PROFILE ENDPOINTS
+# =============================================================================
 
 @app.route('/api/user/profile', methods=['GET'])
 def get_user_profile():
