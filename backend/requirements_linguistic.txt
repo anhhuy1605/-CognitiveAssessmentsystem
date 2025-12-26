@@ -1,0 +1,66 @@
+# Requirements for Linguistic Analysis Module
+# Install with: pip install -r requirements_linguistic.txt
+
+# ==============================================================================
+# VIETNAMESE NLP
+# ==============================================================================
+
+# VnCoreNLP Python wrapper
+# Requires Java 8+ and VnCoreNLP models (see setup instructions below)
+vncorenlp>=1.0.3
+
+# Underthesea - Pure Python Vietnamese NLP
+# Fallback when VnCoreNLP not available
+underthesea>=1.3.5
+
+# ==============================================================================
+# DEEP LEARNING FOR SEMANTIC ANALYSIS
+# ==============================================================================
+
+# Transformers for PhoBERT
+transformers>=4.25.0
+
+# PyTorch (CPU version - use appropriate CUDA version if GPU available)
+torch>=1.13.0
+
+# ==============================================================================
+# MACHINE LEARNING
+# ==============================================================================
+
+scikit-learn>=1.0.0
+numpy>=1.21.0
+pandas>=1.3.0
+
+# ==============================================================================
+# SETUP INSTRUCTIONS FOR VnCoreNLP
+# ==============================================================================
+#
+# VnCoreNLP requires Java 8+ and manual model download:
+#
+# Option 1: Using pre-built JAR
+# -----------------------------
+# mkdir -p VnCoreNLP
+# cd VnCoreNLP
+# wget https://raw.githubusercontent.com/vncorenlp/VnCoreNLP/master/VnCoreNLP-1.1.1.jar
+# wget https://raw.githubusercontent.com/vncorenlp/VnCoreNLP/master/models/wordsegmenter/wordsegmenter.rdr
+# wget https://raw.githubusercontent.com/vncorenlp/VnCoreNLP/master/models/wordsegmenter/wordsegmenter.txt
+# wget https://raw.githubusercontent.com/vncorenlp/VnCoreNLP/master/models/postagger/vi-tagger
+# wget https://raw.githubusercontent.com/vncorenlp/VnCoreNLP/master/models/ner/vi-ner
+# wget https://raw.githubusercontent.com/vncorenlp/VnCoreNLP/master/models/dep/vi-dep
+#
+# Option 2: Build from source
+# ---------------------------
+# git clone https://github.com/vncorenlp/VnCoreNLP.git
+# cd VnCoreNLP
+# mvn clean package
+#
+# Usage in Python:
+# ----------------
+# from vncorenlp import VnCoreNLP
+# annotator = VnCoreNLP("VnCoreNLP/VnCoreNLP-1.1.1.jar", annotators="wseg,pos,ner,parse")
+# text = "Tôi là sinh viên."
+# result = annotator.annotate(text)
+# annotator.close()
+#
+# ==============================================================================
+
