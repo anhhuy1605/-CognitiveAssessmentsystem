@@ -6,7 +6,12 @@ Shows how to use the MCI screening system with sample data
 
 import os
 import sys
-import json
+import io
+
+# Fix Windows console encoding
+if sys.platform == 'win32':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(__file__))
@@ -14,32 +19,37 @@ sys.path.insert(0, os.path.dirname(__file__))
 def demo_linguistic_analysis():
     """Demo linguistic analysis with Vietnamese transcript"""
     print("="*60)
-    print("📝 DEMO: LINGUISTIC ANALYSIS")
+    print("[DEMO] LINGUISTIC ANALYSIS")
     print("="*60)
 
     from modules import VietnameseLinguisticAnalyzer
 
     # Sample transcripts for different cognitive states
     transcripts = {
-        "Normal": "Xin chào, tôi tên là Nguyễn Văn A. Hôm nay trời đẹp quá. Tôi rất vui được nói chuyện với bạn. Thời tiết Hà Nội thường rất mát mẻ vào buổi sáng.",
-        "Mild MCI": "Tôi... tên tôi là... à... Trần Văn B. Tôi sống ở... ừm... Hà Nội. Thời tiết... thường... đẹp.",
-        "Moderate MCI": "Tôi... quên rồi... tên gì nhỉ... sống ở đâu... ừm..."
+        "Normal": "Xin chao, toi ten la Nguyen Van A. Hom nay troi dep qua. Toi rat vui duoc noi chuyen voi ban.",
+        "Mild MCI": "Toi... ten toi la... a... Tran Van B. Toi song o... um... Ha Noi. Thoi tiet... thuong... dep.",
+        "Moderate MCI": "Toi... quen roi... ten gi nhi... song o dau... um..."
     }
 
     analyzer = VietnameseLinguisticAnalyzer(use_phobert=False)  # Skip PhoBERT for demo
 
     for category, transcript in transcripts.items():
-        print(f"\n🔍 {category} Transcript:")
+        print(f"\n[{category}] Transcript:")
         print(f"   \"{transcript}\"")
         print("   Analysis:")
 
         features = analyzer.extract_all_features(transcript, task_type='spontaneous_speech')
 
         # Key indicators
-        print(".3f")
-        print(".3f")
-        print(".2f")
-        print(".3f")
+        ttr = features.get('lex_ttr', 0)
+        mattr = features.get('lex_mattr', 0)
+        idea_density = features.get('sem_idea_density', 0)
+        pronoun_ratio = features.get('lex_pronoun_ratio', 0)
+        
+        print(f"   TTR: {ttr:.3f}")
+        print(f"   MATTR: {mattr:.3f}")
+        print(f"   Idea Density: {idea_density:.2f}")
+        print(f"   Pronoun Ratio: {pronoun_ratio:.3f}")
 
         # MCI risk assessment
         risk_score = 0
@@ -53,7 +63,7 @@ def demo_linguistic_analysis():
 def demo_mci_prediction():
     """Demo MCI prediction with sample features"""
     print("\n" + "="*60)
-    print("🧠 DEMO: MCI PREDICTION")
+    print("[DEMO] MCI PREDICTION")
     print("="*60)
 
     from modules import MCIPredictor
@@ -85,24 +95,24 @@ def demo_mci_prediction():
     predictor = MCIPredictor()
 
     for patient_type, features in patients.items():
-        print(f"\n🔍 {patient_type}:")
+        print(f"\n[{patient_type}]:")
         prediction = predictor.predict(features)
 
-        print(".1%")
+        print(f"   MCI Probability: {prediction.mci_probability:.1%}")
         print(f"   MCI Class: {prediction.mci_class}")
-        print(".1f")
+        print(f"   MMSE Estimate: {prediction.mmse_estimate:.1f}/30")
         print(f"   Severity: {prediction.severity}")
-        print(".1%")
+        print(f"   Confidence: {prediction.confidence:.1%}")
 
         if prediction.risk_factors:
             print("   Risk Factors:")
             for rf in prediction.risk_factors[:2]:  # Show first 2
-                print(f"     • {rf}")
+                print(f"     - {rf}")
 
 def demo_integration_service():
     """Demo full integration service"""
     print("\n" + "="*60)
-    print("🚀 DEMO: INTEGRATION SERVICE")
+    print("[DEMO] INTEGRATION SERVICE")
     print("="*60)
 
     from modules import MCIScreeningService
@@ -110,9 +120,9 @@ def demo_integration_service():
     service = MCIScreeningService(use_phobert=False)
 
     # Test with transcript only (no audio file needed)
-    transcript = "Tôi thấy trong tranh có một người mẹ đang rửa bát. Có hai đứa trẻ đang chơi đùa. Bé trai đứng trên ghế lấy bánh mì."
+    transcript = "Toi thay trong tranh co mot nguoi me dang rua bat. Co hai dua tre dang choi dua. Be trai dung tren ghe lay banh mi."
 
-    print("🔍 Analyzing transcript:")
+    print("[Analyzing transcript]:")
     print(f"   \"{transcript}\"")
     print("   (Picture description task)")
 
@@ -121,44 +131,49 @@ def demo_integration_service():
         task_type='picture_description'
     )
 
-    print("
-✅ Analysis Results:"    print(".1%")
-    print(".1f")
+    # Access prediction safely
+    mci_prob = 0
+    if result.mci_prediction:
+        mci_prob = result.mci_prediction.get('mci_probability', 0)
+
+    print("\n[SUCCESS] Analysis Results:")
+    print(f"   MCI Probability: {mci_prob:.1%}")
+    print(f"   MMSE Estimate: {result.mmse_estimate:.1f}/30")
     print(f"   Severity: {result.severity}")
-    print(".1%")
+    print(f"   Confidence: {result.confidence:.1%}")
     print(f"   Processing time: {result.processing_time:.2f}s")
-    print(f"   Linguistic features: {result.linguistic_feature_count}")
-    print(f"   Acoustic features: {result.acoustic_feature_count}")
+    print(f"   Linguistic features: {len(result.linguistic_features) if result.linguistic_features else 0}")
+    print(f"   Acoustic features: {len(result.acoustic_features) if result.acoustic_features else 0}")
 
     if result.recommendations:
         print("   Recommendations:")
         for rec in result.recommendations[:2]:
-            print(f"     • {rec}")
+            print(f"     - {rec}")
 
 def demo_convenience_function():
     """Demo convenience function"""
     print("\n" + "="*60)
-    print("🔧 DEMO: CONVENIENCE FUNCTION")
+    print("[DEMO] CONVENIENCE FUNCTION")
     print("="*60)
 
     from modules import analyze_for_mci
 
     # Quick analysis with transcript
     result = analyze_for_mci(
-        transcript="Xin chào, tôi tên là Nguyễn Văn A. Hôm nay là ngày đẹp trời. Tôi thích đi dạo trong công viên.",
+        transcript="Xin chao, toi ten la Nguyen Van A. Hom nay la ngay dep troi. Toi thich di dao trong cong vien.",
         task_type="spontaneous_speech"
     )
 
-    print("🔍 Quick Analysis Result:")
+    print("[Quick Analysis Result]:")
     print(f"   Success: {result['success']}")
-    print(".1%")
-    print(".1f")
+    print(f"   MCI Probability: {result['mci_probability']:.1%}")
+    print(f"   MMSE Estimate: {result['mmse_estimate']:.1f}/30")
     print(f"   Severity: {result['severity']}")
     print(f"   Processing time: {result['processing_time']:.2f}s")
 
 def main():
     """Run all demos"""
-    print("🧪 MCI Screening Modules - Demo")
+    print("[MCI Screening Modules - Demo]")
     print("="*60)
     print("This demo shows how to use the MCI screening system")
     print("with Vietnamese language transcripts.\n")
@@ -170,7 +185,7 @@ def main():
         demo_convenience_function()
 
         print("\n" + "="*60)
-        print("🎉 DEMO COMPLETED SUCCESSFULLY!")
+        print("[SUCCESS] DEMO COMPLETED!")
         print("="*60)
         print("\nTo use with real audio files:")
         print("1. Install full dependencies: pip install -r requirements_modules.txt")
@@ -178,7 +193,9 @@ def main():
         print("3. For API: Start server and use /api/mci/analyze endpoint")
 
     except Exception as e:
-        print(f"\n❌ Demo failed: {e}")
+        print(f"\n[ERROR] Demo failed: {e}")
+        import traceback
+        traceback.print_exc()
         print("\nTroubleshooting:")
         print("1. Install dependencies: pip install -r requirements_modules.txt")
         print("2. Run test script: python test_mci_modules.py")

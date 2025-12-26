@@ -7,8 +7,14 @@ Test all components individually and as integrated system
 import os
 import sys
 import json
+import io
 import logging
 from pathlib import Path
+
+# Fix Windows console encoding
+if sys.platform == 'win32':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(__file__))
@@ -20,7 +26,7 @@ logger = logging.getLogger(__name__)
 def test_imports():
     """Test module imports"""
     print("="*60)
-    print("🧪 TESTING MODULE IMPORTS")
+    print("[TEST] MODULE IMPORTS")
     print("="*60)
 
     try:
@@ -32,74 +38,74 @@ def test_imports():
             MCIScreeningService,
             analyze_for_mci
         )
-        print("✅ All imports successful")
+        print("[PASS] All imports successful")
         return True
     except ImportError as e:
-        print(f"❌ Import error: {e}")
+        print(f"[FAIL] Import error: {e}")
         return False
 
 def test_acoustic_analyzer():
     """Test acoustic analyzer"""
     print("\n" + "="*60)
-    print("🎤 TESTING ACOUSTIC ANALYZER")
+    print("[TEST] ACOUSTIC ANALYZER")
     print("="*60)
 
     try:
         from modules import AcousticAnalyzer
 
         analyzer = AcousticAnalyzer()
-        print("✅ AcousticAnalyzer initialized")
+        print("[PASS] AcousticAnalyzer initialized")
 
         # Test with dummy data (should handle gracefully)
         features = analyzer.extract_all_features("nonexistent.wav")
         if features:
-            print(f"✅ Extracted {len(features)} features")
+            print(f"[PASS] Extracted {len(features)} features")
             print(f"   Sample features: {list(features.keys())[:5]}")
         else:
-            print("⚠️ No features extracted (expected for nonexistent file)")
+            print("[WARN] No features extracted (expected for nonexistent file)")
 
         return True
     except Exception as e:
-        print(f"❌ Acoustic analyzer error: {e}")
+        print(f"[FAIL] Acoustic analyzer error: {e}")
         return False
 
 def test_linguistic_analyzer():
     """Test linguistic analyzer"""
     print("\n" + "="*60)
-    print("📝 TESTING LINGUISTIC ANALYZER")
+    print("[TEST] LINGUISTIC ANALYZER")
     print("="*60)
 
     try:
         from modules import VietnameseLinguisticAnalyzer
 
         analyzer = VietnameseLinguisticAnalyzer(use_phobert=False)  # Skip PhoBERT for speed
-        print("✅ VietnameseLinguisticAnalyzer initialized")
+        print("[PASS] VietnameseLinguisticAnalyzer initialized")
 
         # Test with sample transcript
-        transcript = "Xin chào, tôi tên là Nguyễn Văn A. Hôm nay trời đẹp quá."
+        transcript = "Xin chao, toi ten la Nguyen Van A. Hom nay troi dep qua."
         features = analyzer.extract_all_features(transcript, task_type='spontaneous_speech')
 
-        print(f"✅ Extracted {len(features)} linguistic features")
+        print(f"[PASS] Extracted {len(features)} linguistic features")
         print(f"   Sample features: {list(features.keys())[:5]}")
         print(f"   TTR: {features.get('lex_ttr', 'N/A')}")
         print(f"   MLU: {features.get('syn_mlu_words', 'N/A')}")
 
         return True
     except Exception as e:
-        print(f"❌ Linguistic analyzer error: {e}")
+        print(f"[FAIL] Linguistic analyzer error: {e}")
         return False
 
 def test_mci_predictor():
     """Test MCI predictor"""
     print("\n" + "="*60)
-    print("🧠 TESTING MCI PREDICTOR")
+    print("[TEST] MCI PREDICTOR")
     print("="*60)
 
     try:
         from modules import MCIPredictor
 
         predictor = MCIPredictor()
-        print("✅ MCIPredictor initialized")
+        print("[PASS] MCIPredictor initialized")
 
         # Test with sample features
         sample_features = {
@@ -115,7 +121,7 @@ def test_mci_predictor():
 
         prediction = predictor.predict(sample_features)
 
-        print("✅ Prediction successful:")
+        print("[PASS] Prediction successful:")
         print(f"   MCI Probability: {prediction.mci_probability:.1%}")
         print(f"   MCI Class: {prediction.mci_class}")
         print(f"   MMSE Estimate: {prediction.mmse_estimate:.1f}/30")
@@ -125,20 +131,20 @@ def test_mci_predictor():
 
         return True
     except Exception as e:
-        print(f"❌ MCI predictor error: {e}")
+        print(f"[FAIL] MCI predictor error: {e}")
         return False
 
 def test_multimodal_fusion():
     """Test multimodal fusion"""
     print("\n" + "="*60)
-    print("🔗 TESTING MULTIMODAL FUSION")
+    print("[TEST] MULTIMODAL FUSION")
     print("="*60)
 
     try:
         from modules import MultimodalFusion
 
         fusion = MultimodalFusion()
-        print("✅ MultimodalFusion initialized")
+        print("[PASS] MultimodalFusion initialized")
 
         # Test with sample features
         acoustic_features = {
@@ -167,7 +173,7 @@ def test_multimodal_fusion():
 
         fused = fusion.fuse_features(acoustic_features, linguistic_features)
 
-        print("✅ Fusion successful:")
+        print("[PASS] Fusion successful:")
         print(f"   Fused vector length: {len(fused['fused_vector'])}")
         print(f"   Acoustic features: {fused['n_acoustic_features']}")
         print(f"   Linguistic features: {fused['n_linguistic_features']}")
@@ -175,23 +181,23 @@ def test_multimodal_fusion():
 
         return True
     except Exception as e:
-        print(f"❌ Multimodal fusion error: {e}")
+        print(f"[FAIL] Multimodal fusion error: {e}")
         return False
 
 def test_integration_service():
     """Test integration service"""
     print("\n" + "="*60)
-    print("🚀 TESTING INTEGRATION SERVICE")
+    print("[TEST] INTEGRATION SERVICE")
     print("="*60)
 
     try:
         from modules import MCIScreeningService
 
         service = MCIScreeningService(use_phobert=False)  # Skip PhoBERT for speed
-        print("✅ MCIScreeningService initialized")
+        print("[PASS] MCIScreeningService initialized")
 
         status = service.get_status()
-        print("✅ Status check:")
+        print("[PASS] Status check:")
         print(f"   Service ready: {status['is_ready']}")
         print(f"   Acoustic analyzer: {status['acoustic_analyzer']}")
         print(f"   Linguistic analyzer: {status['linguistic_analyzer']}")
@@ -199,19 +205,19 @@ def test_integration_service():
         print(f"   MCI predictor: {status['mci_predictor']}")
 
         if status['is_ready']:
-            print("🎉 MCI service is fully functional!")
+            print("[SUCCESS] MCI service is fully functional!")
         else:
-            print("⚠️ Some components not available (expected if dependencies missing)")
+            print("[WARN] Some components not available (expected if dependencies missing)")
 
         return True
     except Exception as e:
-        print(f"❌ Integration service error: {e}")
+        print(f"[FAIL] Integration service error: {e}")
         return False
 
 def test_convenience_functions():
     """Test convenience functions"""
     print("\n" + "="*60)
-    print("🔧 TESTING CONVENIENCE FUNCTIONS")
+    print("[TEST] CONVENIENCE FUNCTIONS")
     print("="*60)
 
     try:
@@ -219,10 +225,10 @@ def test_convenience_functions():
 
         # Test with transcript only (no audio)
         result = analyze_for_mci(
-            transcript="Xin chào, tôi tên là Nguyễn Văn A. Hôm nay trời đẹp."
+            transcript="Xin chao, toi ten la Nguyen Van A. Hom nay troi dep."
         )
 
-        print("✅ Convenience function successful:")
+        print("[PASS] Convenience function successful:")
         print(f"   Success: {result['success']}")
         print(f"   MCI Probability: {result['mci_probability']:.1%}")
         print(f"   MMSE Estimate: {result['mmse_estimate']:.1f}/30")
@@ -230,12 +236,12 @@ def test_convenience_functions():
 
         return True
     except Exception as e:
-        print(f"❌ Convenience function error: {e}")
+        print(f"[FAIL] Convenience function error: {e}")
         return False
 
 def main():
     """Run all tests"""
-    print("🧪 MCI Screening Modules Test Suite")
+    print("[MCI Screening Modules Test Suite]")
     print("="*60)
 
     tests = [
@@ -254,19 +260,19 @@ def main():
             result = test_func()
             results[test_name] = result
         except Exception as e:
-            print(f"❌ {test_name} crashed: {e}")
+            print(f"[FAIL] {test_name} crashed: {e}")
             results[test_name] = False
 
     # Summary
     print("\n" + "="*60)
-    print("📊 TEST RESULTS SUMMARY")
+    print("[TEST RESULTS SUMMARY]")
     print("="*60)
 
     passed = 0
     total = len(results)
 
     for test_name, success in results.items():
-        status = "✅ PASS" if success else "❌ FAIL"
+        status = "[PASS]" if success else "[FAIL]"
         print(f"{status} {test_name}")
         if success:
             passed += 1
@@ -274,11 +280,11 @@ def main():
     print(f"\nTotal: {passed}/{total} tests passed")
 
     if passed == total:
-        print("🎉 ALL TESTS PASSED! MCI modules are ready to use.")
+        print("[SUCCESS] ALL TESTS PASSED! MCI modules are ready to use.")
     elif passed >= total - 1:  # Allow 1 failure for optional dependencies
-        print("⚠️ MOST TESTS PASSED. Some optional dependencies may be missing.")
+        print("[WARN] MOST TESTS PASSED. Some optional dependencies may be missing.")
     else:
-        print("❌ SOME TESTS FAILED. Check dependency installation.")
+        print("[ERROR] SOME TESTS FAILED. Check dependency installation.")
 
     print("\nNext steps:")
     print("1. Install missing dependencies: pip install -r requirements_modules.txt")

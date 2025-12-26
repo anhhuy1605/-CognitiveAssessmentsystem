@@ -411,21 +411,35 @@ def analyze_for_mci(audio_path: Optional[str] = None,
         task_type: Type of cognitive task
     
     Returns:
-        dict: Analysis result
+        dict: Analysis result with convenient access to key metrics
     """
     service = get_mci_service()
     result = service.analyze(audio_path, transcript, task_type)
     
-    # Convert to dict
+    # Extract MCI probability from prediction
+    mci_prob = 0.0
+    mci_class = "Unknown"
+    if result.mci_prediction:
+        mci_prob = result.mci_prediction.get('mci_probability', 0.0)
+        mci_class = result.mci_prediction.get('mci_class', 'Unknown')
+    
+    # Convert to dict with convenient access fields
     return {
         'success': result.success,
+        # Convenient access to key metrics
+        'mci_probability': mci_prob,
+        'mci_class': mci_class,
+        'mmse_estimate': result.mmse_estimate,
+        'severity': result.severity,
+        'confidence': result.confidence,
+        # Feature counts
+        'acoustic_feature_count': len(result.acoustic_features) if result.acoustic_features else 0,
+        'linguistic_feature_count': len(result.linguistic_features) if result.linguistic_features else 0,
+        # Full data
         'acoustic_features': result.acoustic_features,
         'linguistic_features': result.linguistic_features,
         'fused_features': result.fused_features,
         'mci_prediction': result.mci_prediction,
-        'mmse_estimate': result.mmse_estimate,
-        'severity': result.severity,
-        'confidence': result.confidence,
         'risk_factors': result.risk_factors,
         'recommendations': result.recommendations,
         'feature_summary': result.feature_summary,
