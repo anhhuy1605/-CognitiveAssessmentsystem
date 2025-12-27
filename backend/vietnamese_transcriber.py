@@ -15,9 +15,21 @@ import threading
 import queue
 import time
 from pathlib import Path
-from typing import Optional, Dict, Any, List, Callable
+from typing import Optional, Dict, Any, List, Callable, TYPE_CHECKING
 import numpy as np
 from dataclasses import dataclass
+
+# Import torch with proper handling for type hints
+TORCH_AVAILABLE = False
+try:
+    import torch
+    TORCH_AVAILABLE = True
+except ImportError:
+    # Create a mock module for type hints when torch is not installed
+    class MockTorch:
+        class Tensor:
+            pass
+    torch = MockTorch()  # type: ignore
 
 from concurrent.futures import ThreadPoolExecutor
 
@@ -617,10 +629,10 @@ class RealTimeVietnameseTranscriber:
             file_size = os.path.getsize(audio_path)
             logger.info(f"📁 File size: {file_size / 1024:.1f} KB")
             
-            # Check Gemini API key
-            gemini_api_key = os.getenv('GEMINI_API_KEY')
+            # Check Gemini API key (support both GEMINI_API_KEY and GOOGLE_API_KEY)
+            gemini_api_key = os.getenv('GEMINI_API_KEY') or os.getenv('GOOGLE_API_KEY')
             if not gemini_api_key:
-                return self._error_result("Gemini API key not configured")
+                return self._error_result("Gemini API key not configured (set GEMINI_API_KEY or GOOGLE_API_KEY)")
 
             # ASR option removed; always use Gemini model
             transcription_model = os.getenv('GEMINI_STT_MODEL', 'gemini-2.5-flash')
@@ -708,10 +720,10 @@ Please start transcribing the audio content:
                 text = (getattr(response, 'text', None) or "").strip()
                 confidence = 0.8  # Gemini does not provide confidence; set a reasonable default
                 
-                # Use GPT-4o to improve transcript quality - configurable via ENV
+                # Gemini-only transcription - NO GPT-4o improvement
                 improved_text = text
                 gpt4o_processing_time = 0
-                enable_gpt_improve = os.getenv('ENABLE_GPT_TRANSCRIPT_IMPROVE', 'false').lower() == 'true'
+                used_gpt = False  # Gemini doesn't use GPT-4o
                 
                 # Check if text is meaningful (not just noise or silence)
                 text_stripped = text.strip()
@@ -745,7 +757,6 @@ Please start transcribing the audio content:
                 has_generic_phrases = any(phrase in text_lower for phrase in generic_phrases)
 
                 # Treat clearly hallucinated/marketing-like content as invalid speech
-                meaningless_hit = any(pattern in text_lower for pattern in meaningless_patterns)
                 is_suspicious = False
                 # Only treat as no speech for explicit marketing phrases/words or common YT closing
                 if has_suspicious_content or has_generic_phrases or ('hẹn gặp lại' in text_lower and 'video' in text_lower):
@@ -756,42 +767,8 @@ Please start transcribing the audio content:
                     confidence = 0.0
                     is_suspicious = True
                 
-                # Relaxed validation - enable GPT-4o for reasonable cases
-                is_meaningful = True  # default before ENV gate
-
-                # Only disable GPT-4o for very specific problematic cases
-                if (len(text_stripped) < 3 or  # Too short
-                    confidence < 0.1 or  # Very low confidence
-                    any(pattern in text_stripped.lower() for pattern in meaningless_patterns) or
-                    has_suspicious_content or
-                    has_generic_phrases):
-                    is_meaningful = False
-                # ENV gate: disable GPT improvement unless explicitly enabled
-                if not enable_gpt_improve:
-                    is_meaningful = False
-                
-                used_gpt = False
-                if is_meaningful:
-                    logger.info("🤖 Improving transcript with GPT-4o...")
-                    improved_text = self._improve_with_gpt4o(text, language)
-                    used_gpt = True
-                    
-                    gpt4o_time = time.time()
-                    gpt4o_processing_time = gpt4o_time - whisper_time
-                    
-                    # Validate that GPT-4o didn't add too much content
-                    original_words = len(text.split())
-                    improved_words = len(improved_text.split())
-                    
-                    if improved_words > original_words * 1.5:  # If GPT added more than 50% content
-                        logger.warning(f"⚠️ GPT-4o added too much content: {original_words} -> {improved_words} words")
-                        improved_text = text  # Revert to original
-                        gpt4o_processing_time = 0
-                        used_gpt = False
-                    else:
-                        logger.info(f"✨ GPT-4o improvement completed in {gpt4o_processing_time:.2f}s")
-                else:
-                    logger.info(f"⏭️ Skipping GPT-4o improvement (text: '{text_stripped}', length: {len(text_stripped)}, confidence: {confidence:.2f})")
+                # Gemini transcription is used directly without GPT-4o improvement
+                logger.info(f"🎯 Using Gemini transcription directly (no GPT-4o improvement)")
                 
                 total_processing_time = time.time() - start_time
                 logger.info(f"⏱️ Total processing time: {total_processing_time:.2f}s")
@@ -858,9 +835,9 @@ Please start transcribing the audio content:
                     'is_suspicious': is_suspicious
                 }
                 
-            except Exception as openai_error:
-                logger.error(f"❌ OpenAI transcription failed: {openai_error}")
-                return self._error_result(f"OpenAI transcription failed: {openai_error}")
+            except Exception as gemini_error:
+                logger.error(f"❌ Gemini transcription failed: {gemini_error}")
+                return self._error_result(f"Gemini transcription failed: {gemini_error}")
             
         except Exception as e:
             logger.error(f"❌ Transcription failed: {e}")
@@ -869,70 +846,15 @@ Please start transcribing the audio content:
 
     
     def _improve_with_gpt4o(self, text: str, language: str = 'vi') -> str:
-        """Cải thiện transcript bằng GPT-4o"""
-        try:
-            openai_api_key = os.getenv('OPENAI_API_KEY')
-            if not openai_api_key or not text.strip():
-                return text
-            
-            from openai import OpenAI
-            client = OpenAI(api_key=openai_api_key)
-            
-            if language == 'vi':
-                prompt = f"""
-                Cải thiện transcript tiếng Việt sau đây một cách THẬN TRỌNG:
-                - Chỉ sửa lỗi chính tả rõ ràng (ví dụ: "toi" -> "tôi")
-                - Thêm dấu câu cơ bản nếu thiếu
-                - KHÔNG thêm từ mới hoặc thay đổi ý nghĩa
-                - KHÔNG thêm nội dung không có trong audio gốc
-                - Giữ nguyên độ dài và cấu trúc câu
-                
-                Transcript gốc: "{text}"
-                
-                Chỉ trả về text đã cải thiện, không thêm giải thích. Nếu transcript quá ngắn hoặc không rõ ràng, trả về nguyên bản.
-                """
-                system_content = "Bạn là chuyên gia cải thiện transcript tiếng Việt. Chỉ sửa lỗi chính tả và dấu câu, KHÔNG thêm nội dung mới."
-            else:
-                prompt = f"""
-                Carefully improve the following English transcript:
-                - Only fix obvious spelling errors
-                - Add basic punctuation if missing
-                - DO NOT add new words or change meaning
-                - DO NOT add content not in the original audio
-                - Keep the same length and sentence structure
-                
-                Original transcript: "{text}"
-                
-                Only return the improved text, no explanations. If the transcript is too short or unclear, return the original.
-                """
-                system_content = "You are an expert in improving English transcripts. Only fix spelling and punctuation, DO NOT add new content."
-            
-            response = client.chat.completions.create(
-                model="gpt-4o",  # Sử dụng GPT-4o để có chất lượng tốt nhất
-                messages=[
-                    {"role": "system", "content": system_content},
-                    {"role": "user", "content": prompt}
-                ],
-                max_tokens=500,
-                temperature=0.1
-            )
-
-            # Safely extract response content
-            message_content = response.choices[0].message.content
-            if message_content is None:
-                logger.warning("⚠️ GPT-4o returned None content")
-                return text
-
-            improved_text = message_content.strip()
-            if improved_text and improved_text != text:
-                logger.info("✨ GPT-4o improved transcript quality")
-                return improved_text
-
-            return text
-            
-        except Exception as e:
-            logger.warning(f"⚠️ GPT-4o improvement failed: {e}")
-            return text
+        """
+        DEPRECATED: GPT-4o improvement disabled.
+        Transcription uses Gemini only, MMSE evaluation uses GPT-4o only.
+        This method now returns the original text unchanged.
+        """
+        # GPT-4o is no longer used for transcript improvement
+        # Return original text unchanged
+        logger.info("⏭️ GPT-4o transcript improvement disabled - using Gemini transcription directly")
+        return text
     
     def _chunk_audio(self, waveform: torch.Tensor, sample_rate: int) -> List[torch.Tensor]:
         """Chia audio thành chunks để xử lý tốt hơn"""
@@ -2775,8 +2697,8 @@ Please start transcribing the audio content:
             'improved_text': ''
         }
     
-    def _transcribe_with_whisper_only(self, audio_path: str, language: str = 'vi') -> Dict[str, Any]:
-        """Transcribe chỉ sử dụng OpenAI Whisper, KHÔNG có GPT-4o improvement"""
+    def _transcribe_with_gemini_only(self, audio_path: str, language: str = 'vi') -> Dict[str, Any]:
+        """Transcribe using Gemini ONLY, no GPT-4o improvement"""
         try:
             start_time = time.time()
             
@@ -2796,54 +2718,59 @@ Please start transcribing the audio content:
             if not processed_path:
                 return self._error_result("Failed to process audio file")
             
-            # Transcribe with OpenAI Whisper
-            openai_api_key = os.getenv('OPENAI_API_KEY')
-            if not openai_api_key:
-                return self._error_result("OpenAI API key not configured")
+            # Transcribe with Gemini
+            gemini_api_key = os.getenv('GEMINI_API_KEY')
+            if not gemini_api_key:
+                return self._error_result("Gemini API key not configured")
             
-            from openai import OpenAI
-            client = OpenAI(api_key=openai_api_key)
+            import google.generativeai as genai
+            genai.configure(api_key=gemini_api_key)
+            model_name = os.getenv('GEMINI_STT_MODEL', 'gemini-2.5-flash')
+            model = genai.GenerativeModel(model_name)
             
-            whisper_start = time.time()
+            gemini_start = time.time()
             
-            with open(processed_path, "rb") as audio_file:
-                transcript = client.audio.transcriptions.create(
-                    model="whisper-1",
-                    file=audio_file,
-                    language=language,
-                    response_format="verbose_json",
-                    timestamp_granularities=["word"]
-                )
+            # Upload and transcribe
+            gemini_file = genai.upload_file(path=processed_path, mime_type="audio/wav")
             
-            whisper_time = time.time()
-            whisper_processing_time = whisper_time - whisper_start
+            if language == 'vi':
+                prompt = """
+Hãy chép lại CHÍNH XÁC nội dung tiếng Việt trong audio này:
+- Chú ý dấu thanh tiếng Việt
+- Chỉ trả về transcript thuần văn bản
+Transcript:
+"""
+            else:
+                prompt = """
+Please transcribe the audio content accurately:
+- Only return plain text transcript
+Transcript:
+"""
             
-            # Extract text and confidence
-            text = transcript.text
-            confidence = 0.9  # Default high confidence for OpenAI Whisper
-            if hasattr(transcript, 'segments') and transcript.segments:
-                total_confidence = sum(seg.get('avg_logprob', 0) for seg in transcript.segments)
-                confidence = max(0.5, min(1.0, total_confidence / len(transcript.segments) + 0.5))
+            response = model.generate_content([gemini_file, prompt])
+            text = (getattr(response, 'text', None) or "").strip()
+            
+            gemini_time = time.time()
+            gemini_processing_time = gemini_time - gemini_start
+            
+            # Gemini doesn't provide confidence scores
+            confidence = 0.8
             
             total_processing_time = time.time() - start_time
             
-            logger.info(f"🎵 Whisper-only transcription completed in {whisper_processing_time:.2f}s")
+            logger.info(f"🎵 Gemini-only transcription completed in {gemini_processing_time:.2f}s")
             logger.info(f"📝 Raw transcript: {text}")
             logger.info(f"🎯 Confidence: {confidence:.2f}")
             
             # Apply enhanced language model corrections (no GPT-4o)
             if language == 'vi':
-                # DISABLED: Enhanced Vietnamese corrections logging
                 corrected_text = self.language_model.correct_transcript(text)
                 corrected_text = self._apply_vietnamese_specific_corrections(corrected_text)
                 vietnamese_confidence = self.language_model.calculate_vietnamese_confidence(corrected_text)
                 vietnamese_confidence = max(vietnamese_confidence, 0.85)  # Boost confidence for Vietnamese
-                # DISABLED: Vietnamese corrections completed logging
             else:
-                # DISABLED: Enhanced English corrections logging
                 corrected_text = self._apply_english_specific_corrections(text)
                 vietnamese_confidence = confidence
-                # DISABLED: English corrections completed logging
             
             return {
                 'success': True,
@@ -2852,18 +2779,18 @@ Please start transcribing the audio content:
                 'vietnamese_confidence': vietnamese_confidence,
                 'segments': 1,
                 'duration': duration,
-                'model': 'openai-whisper-1-only',
+                'model': 'gemini-only',
                 'language': language,
                 'processing_time': total_processing_time,
-                'whisper_time': whisper_processing_time,
+                'gemini_time': gemini_processing_time,
                 'gpt4o_time': 0.0,
                 'original_text': text,
                 'improved_text': text  # No improvement
             }
             
         except Exception as e:
-            logger.error(f"❌ Whisper-only transcription failed: {e}")
-            return self._error_result(f"Whisper-only transcription failed: {e}")
+            logger.error(f"❌ Gemini-only transcription failed: {e}")
+            return self._error_result(f"Gemini-only transcription failed: {e}")
     
     def get_system_info(self) -> Dict[str, Any]:
         """Lấy thông tin system"""

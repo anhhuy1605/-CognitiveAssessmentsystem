@@ -20,5 +20,5 @@ Backend khởi động dùng model mới (bundle trong `models/`), không bị c
 ## Plan
 
 1) Relax legacy imports: bọc/ghi chú các import không cần thiết (pipeline_api, clinical_ml_models, VietnameseTranscriber, language packs) để không chặn startup khi thiếu.
+
 2) Load bundle path: giữ `models/` làm default, hỗ trợ feature_names json/pkl (đã có), và log rõ ràng khi load thành công.
-3) Startup verification: thêm log/health check dùng `load_model_bundle()` tại init; nếu fail, trả lỗi rõ ràng. Confirm service uses new bundle artifacts (`best_model.pkl`, `feature_names.json`, `metadata.json`).

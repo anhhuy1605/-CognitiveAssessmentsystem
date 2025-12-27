@@ -16,6 +16,7 @@ import {
   checkBackendHealth,
   API_BASE_URL
 } from '@/lib/api-utils';
+import UserInfoForm, { UserInfo } from '@/components/UserInfoForm';
 
 // ============================================
 // INTERFACES
@@ -28,13 +29,7 @@ interface Question {
   instruction?: string;
 }
 
-interface UserInfo {
-  name: string;
-  age: string;
-  gender: string;
-  education_years: string;
-  notes: string;
-}
+// UserInfo is now imported from UserInfoForm component
 
 interface AudioFeatures {
   duration: number;
@@ -79,7 +74,7 @@ export default function CognitiveAssessmentPage() {
   // ============================================
   // STATE
   // ============================================
-  
+
   // Step management: 'userInfo' -> 'assessment' -> 'completed'
   const [currentStep, setCurrentStep] = useState<'userInfo' | 'assessment' | 'completed'>('userInfo');
   
@@ -213,11 +208,9 @@ export default function CognitiveAssessmentPage() {
   
   // Start assessment
   const startAssessment = () => {
-    if (!validateUserInfo()) {
-      return;
-    }
+    // User info is already validated in UserInfoForm component
     setCurrentStep('assessment');
-    // Speak first question
+    // Speak first question with personalized greeting
     setTimeout(() => {
       speakQuestion(0);
     }, 500);
@@ -246,10 +239,14 @@ export default function CognitiveAssessmentPage() {
   };
   
   const getGreeting = (): string => {
+    const addressTerm = userInfo.address_term || 'Bạn';
     const hour = new Date().getHours();
-    if (hour < 12) return 'Chào buổi sáng';
-    if (hour < 18) return 'Chào buổi chiều';
-    return 'Chào buổi tối';
+    let timeGreeting = '';
+    if (hour < 12) timeGreeting = 'Chào buổi sáng';
+    else if (hour < 18) timeGreeting = 'Chào buổi chiều';
+    else timeGreeting = 'Chào buổi tối';
+
+    return `${timeGreeting} ${addressTerm.toLowerCase()}`;
   };
   
   // Recording functions
@@ -593,188 +590,97 @@ export default function CognitiveAssessmentPage() {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -20 }}
-              className="space-y-8"
+              className="py-8"
             >
               {/* Welcome message */}
-              <div className="text-center py-8">
-                <div className="text-6xl mb-4">👋</div>
-                <h2 className="text-3xl font-bold text-amber-900 mb-3">
-                  Chào mừng bạn đến với bài kiểm tra!
-                </h2>
-                <p className="text-xl text-amber-700 max-w-2xl mx-auto leading-relaxed">
-                  Vui lòng điền thông tin cá nhân trước khi bắt đầu. 
-                  Thông tin này giúp chúng tôi đánh giá chính xác hơn.
-                </p>
+              <div className="text-center mb-8">
+                <motion.div
+                  initial={{ scale: 0 }}
+                  animate={{ scale: 1 }}
+                  transition={{ delay: 0.2, type: "spring", stiffness: 200 }}
+                  className="text-6xl mb-4"
+                >
+                  🧠
+                </motion.div>
+                <motion.h2
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.3 }}
+                  className="text-3xl font-bold text-gray-800 mb-3"
+                >
+                  Chào mừng đến với bài kiểm tra nhận thức
+                </motion.h2>
+                <motion.p
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.4 }}
+                  className="text-lg text-gray-600 max-w-2xl mx-auto leading-relaxed"
+                >
+                  Trước khi bắt đầu, vui lòng cung cấp một số thông tin cá nhân.
+                  Điều này giúp chúng tôi cá nhân hóa bài kiểm tra và đưa ra đánh giá chính xác hơn.
+                </motion.p>
               </div>
-              
-              {/* User Info Form */}
-              <div className="bg-white rounded-3xl shadow-xl p-8 border-2 border-amber-200">
-                <div className="flex items-center gap-4 mb-8">
-                  <div className="w-14 h-14 rounded-full flex items-center justify-center" style={{
-                    background: 'linear-gradient(135deg, #F4A261 0%, #E88D4D 100%)'
-                  }}>
-                    <User className="w-7 h-7 text-white" />
-                  </div>
-                  <div>
-                    <h3 className="text-2xl font-bold text-amber-900">Thông tin cá nhân</h3>
-                    <p className="text-amber-700">Các trường có dấu * là bắt buộc</p>
-                  </div>
-                </div>
-                
-                <div className="grid gap-6">
-                  {/* Name */}
-                  <div>
-                    <label className="block text-lg font-semibold text-amber-900 mb-2">
-                      Họ và tên <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      value={userInfo.name}
-                      onChange={(e) => setUserInfo(prev => ({ ...prev, name: e.target.value }))}
-                      className={`w-full px-5 py-4 text-xl rounded-2xl border-2 transition-all focus:outline-none focus:ring-4 focus:ring-amber-200 ${
-                        userInfoErrors.name ? 'border-red-400 bg-red-50' : 'border-amber-300 focus:border-amber-500'
-                      }`}
-                      placeholder="Nhập họ và tên của bạn"
-                    />
-                    {userInfoErrors.name && (
-                      <p className="mt-2 text-red-600 text-lg">{userInfoErrors.name}</p>
-                    )}
-                  </div>
-                  
-                  {/* Age and Gender */}
-                  <div className="grid grid-cols-2 gap-6">
-                    <div>
-                      <label className="block text-lg font-semibold text-amber-900 mb-2">
-                        Tuổi <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="number"
-                        min={1}
-                        max={120}
-                        value={userInfo.age}
-                        onChange={(e) => setUserInfo(prev => ({ ...prev, age: e.target.value }))}
-                        className={`w-full px-5 py-4 text-xl rounded-2xl border-2 transition-all focus:outline-none focus:ring-4 focus:ring-amber-200 ${
-                          userInfoErrors.age ? 'border-red-400 bg-red-50' : 'border-amber-300 focus:border-amber-500'
-                        }`}
-                        placeholder="Nhập tuổi"
-                      />
-                      {userInfoErrors.age && (
-                        <p className="mt-2 text-red-600 text-lg">{userInfoErrors.age}</p>
-                      )}
-                    </div>
-                    
-                    <div>
-                      <label className="block text-lg font-semibold text-amber-900 mb-2">
-                        Giới tính <span className="text-red-500">*</span>
-                      </label>
-                      <select
-                        value={userInfo.gender}
-                        onChange={(e) => setUserInfo(prev => ({ ...prev, gender: e.target.value }))}
-                        className={`w-full px-5 py-4 text-xl rounded-2xl border-2 transition-all focus:outline-none focus:ring-4 focus:ring-amber-200 ${
-                          userInfoErrors.gender ? 'border-red-400 bg-red-50' : 'border-amber-300 focus:border-amber-500'
-                        }`}
-                      >
-                        <option value="">-- Chọn giới tính --</option>
-                        <option value="male">Nam</option>
-                        <option value="female">Nữ</option>
-                        <option value="other">Khác</option>
-                      </select>
-                      {userInfoErrors.gender && (
-                        <p className="mt-2 text-red-600 text-lg">{userInfoErrors.gender}</p>
-                      )}
-                    </div>
-                  </div>
-                  
-                  {/* Education */}
-                  <div>
-                    <label className="block text-lg font-semibold text-amber-900 mb-2">
-                      Số năm đi học (không bắt buộc)
-                    </label>
-                    <input
-                      type="number"
-                      min={0}
-                      max={30}
-                      value={userInfo.education_years}
-                      onChange={(e) => setUserInfo(prev => ({ ...prev, education_years: e.target.value }))}
-                      className="w-full px-5 py-4 text-xl rounded-2xl border-2 border-amber-300 focus:border-amber-500 focus:outline-none focus:ring-4 focus:ring-amber-200"
-                      placeholder="Ví dụ: 12 (hết lớp 12)"
-                    />
-                    <p className="mt-2 text-amber-600">
-                      Ví dụ: 12 năm = Tốt nghiệp cấp 3, 16 năm = Đại học
-                    </p>
-                  </div>
-                  
-                  {/* Notes */}
-                  <div>
-                    <label className="block text-lg font-semibold text-amber-900 mb-2">
-                      Ghi chú thêm (không bắt buộc)
-                    </label>
-                    <textarea
-                      rows={3}
-                      value={userInfo.notes}
-                      onChange={(e) => setUserInfo(prev => ({ ...prev, notes: e.target.value }))}
-                      className="w-full px-5 py-4 text-xl rounded-2xl border-2 border-amber-300 focus:border-amber-500 focus:outline-none focus:ring-4 focus:ring-amber-200 resize-none"
-                      placeholder="Ghi chú về tình trạng sức khỏe, thuốc đang dùng..."
-                    />
-                  </div>
-                </div>
-                
-                {/* Start button */}
-                <div className="mt-10">
-                  <Button
-                    onClick={startAssessment}
-                    disabled={!questionsLoaded}
-                    className="w-full py-6 text-2xl font-bold rounded-2xl text-white shadow-lg hover:shadow-xl transition-all transform hover:scale-[1.02]"
-                    style={{
-                      background: questionsLoaded 
-                        ? 'linear-gradient(135deg, #F4A261 0%, #E88D4D 100%)'
-                        : '#ccc'
-                    }}
-                  >
-                    {questionsLoaded ? (
-                      <>
-                        <Play className="w-8 h-8 mr-3" />
-                        Bắt đầu kiểm tra
-                      </>
-                    ) : (
-                      <>
-                        <Loader2 className="w-8 h-8 mr-3 animate-spin" />
-                        Đang tải câu hỏi...
-                      </>
-                    )}
-                  </Button>
-                  
-                  <p className="text-center mt-4 text-amber-700 text-lg">
-                    📝 Bài kiểm tra gồm {questions.length || '...'} câu hỏi • 
-                    ⏱️ Thời gian khoảng 15-20 phút
-                  </p>
-                </div>
-              </div>
-              
-              {/* Tips for elderly */}
-              <div className="bg-amber-50 rounded-2xl p-6 border-2 border-amber-200">
-                <h4 className="text-xl font-bold text-amber-900 mb-4 flex items-center gap-2">
+
+              {/* User Info Form Component */}
+              <UserInfoForm
+                userInfo={userInfo}
+                onUserInfoChange={setUserInfo}
+                onNext={startAssessment}
+                errors={userInfoErrors}
+                isSubmitting={isProcessing}
+                title="Thông tin cá nhân"
+                description="Vui lòng điền đầy đủ thông tin để chúng tôi có thể đánh giá chính xác nhất."
+              />
+
+              {/* Enhanced Tips for elderly */}
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.8 }}
+                className="mt-8 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-2xl p-6 border-2 border-blue-200"
+              >
+                <h4 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
                   💡 Hướng dẫn sử dụng
                 </h4>
-                <ul className="space-y-3 text-lg text-amber-800">
-                  <li className="flex items-start gap-3">
-                    <span className="text-2xl">🔊</span>
-                    <span>Mỗi câu hỏi sẽ được <strong>đọc to</strong> bằng giọng nói</span>
-                  </li>
-                  <li className="flex items-start gap-3">
-                    <span className="text-2xl">🎤</span>
-                    <span>Nhấn nút <strong>ghi âm</strong> và trả lời bằng giọng nói của bạn</span>
-                  </li>
-                  <li className="flex items-start gap-3">
-                    <span className="text-2xl">⏱️</span>
-                    <span>Không cần vội, hãy <strong>trả lời thoải mái</strong></span>
-                  </li>
-                  <li className="flex items-start gap-3">
-                    <span className="text-2xl">🔄</span>
-                    <span>Có thể <strong>ghi âm lại</strong> nếu chưa hài lòng</span>
-                  </li>
-                </ul>
-              </div>
+                <div className="grid md:grid-cols-2 gap-4">
+                  <ul className="space-y-3 text-gray-700">
+                    <li className="flex items-start gap-3">
+                      <span className="text-2xl">🔊</span>
+                      <span>Mỗi câu hỏi sẽ được <strong>đọc to</strong> bằng giọng nói tự nhiên</span>
+                    </li>
+                    <li className="flex items-start gap-3">
+                      <span className="text-2xl">🎤</span>
+                      <span>Nhấn nút <strong>ghi âm</strong> và trả lời bằng giọng nói của bạn</span>
+                    </li>
+                    <li className="flex items-start gap-3">
+                      <span className="text-2xl">⏱️</span>
+                      <span>Không cần vội, hãy <strong>trả lời thoải mái</strong></span>
+                    </li>
+                    <li className="flex items-start gap-3">
+                      <span className="text-2xl">🔄</span>
+                      <span>Có thể <strong>ghi âm lại</strong> nếu chưa hài lòng</span>
+                    </li>
+                  </ul>
+                  <ul className="space-y-3 text-gray-700">
+                    <li className="flex items-start gap-3">
+                      <span className="text-2xl">📝</span>
+                      <span>Bài kiểm tra gồm <strong>{questions.length || '...'}</strong> câu hỏi</span>
+                    </li>
+                    <li className="flex items-start gap-3">
+                      <span className="text-2xl">⏰</span>
+                      <span>Thời gian khoảng <strong>15-20 phút</strong></span>
+                    </li>
+                    <li className="flex items-start gap-3">
+                      <span className="text-2xl">🔒</span>
+                      <span><strong>An toàn và bảo mật</strong> thông tin cá nhân</span>
+                    </li>
+                    <li className="flex items-start gap-3">
+                      <span className="text-2xl">📊</span>
+                      <span>Nhận kết quả và <strong>lời khuyên</strong> chi tiết</span>
+                    </li>
+                  </ul>
+                </div>
+              </motion.div>
             </motion.div>
           )}
 

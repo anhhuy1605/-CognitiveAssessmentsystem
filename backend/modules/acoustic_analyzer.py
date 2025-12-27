@@ -720,6 +720,19 @@ class AcousticAnalyzer:
             dict: Comprehensive acoustic feature dictionary with ~100+ features
         """
         logger.info(f"🎤 Starting comprehensive acoustic analysis: {audio_path}")
+        
+        # ✅ FIX: Preprocess audio FIRST (convert webm to wav)
+        preprocessed_file = None
+        try:
+            from modules.audio_preprocessor import preprocess_audio_for_analysis
+            preprocessed_file = preprocess_audio_for_analysis(audio_path)
+            audio_path = preprocessed_file
+            logger.info(f"✅ Using preprocessed audio: {audio_path}")
+        except Exception as e:
+            logger.error(f"❌ Audio preprocessing failed: {e}")
+            # Return default features if preprocessing fails
+            return self._get_default_features()
+        
         features = {}
         
         # 1. eGeMAPS Features (88 features)
@@ -763,7 +776,31 @@ class AcousticAnalyzer:
             features.update({f"tone_{k}": v for k, v in tone_features.items()})
         
         logger.info(f"✅ Extracted {len(features)} total acoustic features")
+        
+        # Clean up temporary preprocessed file
+        if preprocessed_file and preprocessed_file != audio_path:
+            try:
+                from modules.audio_preprocessor import cleanup_temp_audio
+                cleanup_temp_audio(preprocessed_file)
+            except:
+                pass
+        
         return features
+    
+    def _get_default_features(self) -> Dict[str, Any]:
+        """Return safe default features when extraction fails"""
+        logger.warning("⚠️ Using default acoustic features due to extraction failure")
+        return {
+            'f0_mean': 150.0,
+            'f0_std': 30.0,
+            'f0_range': 100.0,
+            'vq_jitter_local': 1.0,
+            'vq_shimmer_local': 3.0,
+            'vq_hnr_mean': 15.0,
+            'pause_mean_pause_duration': 0.5,
+            'pause_pause_rate': 0.3,
+            'rate_syllables_per_second': 4.0
+        }
 
 
 # Convenience function for direct use

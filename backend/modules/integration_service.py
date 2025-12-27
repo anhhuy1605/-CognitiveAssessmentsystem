@@ -94,10 +94,17 @@ class MCIScreeningService:
         
         Args:
             model_path: Path to pre-trained prediction model (optional)
+                       If None, will auto-detect newest model
             vncorenlp_path: Path to VnCoreNLP installation (optional)
             use_phobert: Whether to use PhoBERT for semantic analysis
         """
         self.errors = []
+        
+        # Auto-detect newest model if not provided
+        if model_path is None:
+            model_path = self._find_newest_model()
+            if model_path:
+                logger.info(f"✅ Auto-detected newest model: {model_path}")
         
         # Initialize acoustic analyzer
         self.acoustic_analyzer = None
@@ -144,10 +151,16 @@ class MCIScreeningService:
         else:
             logger.warning("⚠️ MultimodalFusion not available")
         
-        # Initialize predictor
+        # Initialize predictor with auto-detected newest model
         self.predictor = None
         if PREDICTOR_AVAILABLE:
             try:
+                # Auto-detect newest model if not provided
+                if model_path is None:
+                    model_path = self._find_newest_model()
+                    if model_path:
+                        logger.info(f"✅ Auto-detected newest model: {model_path}")
+                
                 self.predictor = MCIPredictor(model_path)
                 logger.info("✅ MCIPredictor initialized")
             except Exception as e:
@@ -157,6 +170,88 @@ class MCIScreeningService:
             logger.warning("⚠️ MCIPredictor not available")
         
         logger.info(f"MCIScreeningService initialized (errors: {len(self.errors)})")
+    
+    def _find_newest_model(self) -> Optional[str]:
+        """
+        Find the newest model file automatically.
+        Priority order:
+        1. models/best_model.pkl (newest, 2025-12-16)
+        2. model_bundle/model_new_clean/model.pkl (2025-12-11)
+        3. model_bundle/model_new/model.pkl (2025-12-11)
+        4. models/mci_fusion_model.pkl (if exists)
+        """
+        from pathlib import Path
+        import os
+        
+        # Get project root (assuming this file is in backend/modules/)
+        current_file = Path(__file__).resolve()
+        project_root = current_file.parent.parent.parent
+        
+        # Priority 1: models/best_model.pkl (newest)
+        newest_model = project_root / "models" / "best_model.pkl"
+        if newest_model.exists():
+            logger.info(f"✅ Found newest model: {newest_model}")
+            return str(newest_model)
+        
+        # Priority 2: model_bundle/model_new_clean/model.pkl
+        clean_model = project_root / "model_bundle" / "model_new_clean" / "model.pkl"
+        if clean_model.exists():
+            logger.info(f"✅ Found clean model: {clean_model}")
+            return str(clean_model)
+        
+        # Priority 3: model_bundle/model_new/model.pkl
+        new_model = project_root / "model_bundle" / "model_new" / "model.pkl"
+        if new_model.exists():
+            logger.info(f"✅ Found new model: {new_model}")
+            return str(new_model)
+        
+        # Priority 4: models/mci_fusion_model.pkl
+        fusion_model = project_root / "models" / "mci_fusion_model.pkl"
+        if fusion_model.exists():
+            logger.info(f"✅ Found fusion model: {fusion_model}")
+            return str(fusion_model)
+        
+        logger.warning("⚠️ No model found, will use default untrained models")
+        return None
+    
+    def _find_newest_model(self) -> Optional[str]:
+        """
+        Find the newest model file automatically.
+        Priority order:
+        1. models/best_model.pkl (newest, 2025-12-16)
+        2. model_bundle/model_new_clean/model.pkl (2025-12-11)
+        3. model_bundle/model_new/model.pkl (2025-12-11)
+        4. models/mci_fusion_model.pkl (if exists)
+        """
+        from pathlib import Path
+        import os
+        
+        # Get project root (assuming this file is in backend/modules/)
+        current_file = Path(__file__).resolve()
+        project_root = current_file.parent.parent.parent
+        
+        # Priority 1: models/best_model.pkl (newest)
+        newest_model = project_root / "models" / "best_model.pkl"
+        if newest_model.exists():
+            return str(newest_model)
+        
+        # Priority 2: model_bundle/model_new_clean/model.pkl
+        clean_model = project_root / "model_bundle" / "model_new_clean" / "model.pkl"
+        if clean_model.exists():
+            return str(clean_model)
+        
+        # Priority 3: model_bundle/model_new/model.pkl
+        new_model = project_root / "model_bundle" / "model_new" / "model.pkl"
+        if new_model.exists():
+            return str(new_model)
+        
+        # Priority 4: models/mci_fusion_model.pkl
+        fusion_model = project_root / "models" / "mci_fusion_model.pkl"
+        if fusion_model.exists():
+            return str(fusion_model)
+        
+        logger.warning("⚠️ No model found, will use default untrained models")
+        return None
     
     def analyze(self, 
                 audio_path: Optional[str] = None,

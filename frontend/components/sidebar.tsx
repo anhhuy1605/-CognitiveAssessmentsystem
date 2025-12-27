@@ -31,6 +31,7 @@ export const Sidebar = ({ className }: Props) => {
     <div className="flex flex-col w-full divide-y divide-amber-100/70 rounded-3xl overflow-hidden">
       <SidebarItem label={t('home')} iconSrc="/hero.svg" href="/menu" />
       <SidebarItem label={t('cognitive_assessment')} iconSrc="/brain.svg" href="/cognitive-assessment" />
+      <SidebarItem label="🐟 Cá Vàng MMSE" iconSrc="/brain.svg" href="/mmse-chatbot" />
       <SidebarItem label={t('results')} iconSrc="/leaderboard.svg" href="/stats" />
       <SidebarItem label={t('about')} iconSrc="/info.svg" href="/info" />
       <SidebarItem label={t('news_research')} iconSrc="/newspaper.svg" href="/info/news" />

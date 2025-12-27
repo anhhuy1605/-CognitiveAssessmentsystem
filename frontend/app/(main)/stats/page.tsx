@@ -668,7 +668,16 @@ function StatsContent({
         </div>
       ) : (
         <div className="space-y-6">
-          {data.slice(0, 10).map((row) => (
+          {data.slice(0, 10).map((row) => {
+            // Extract userInfo for MMSE chatbot results
+            const userInfo = row.userInfo as any || {};
+            const isMMSEChatbot = row.assessmentType === 'mmse_chatbot';
+            const questionResults = row.questionResults as any || {};
+            const mciResult = questionResults.mciResult || (row.cognitiveAnalysis as any);
+            const acousticFeatures = questionResults.acousticFeatures || row.audioFeatures;
+            const linguisticData = questionResults.linguisticData;
+            
+            return (
             <motion.div
               key={`${row.sessionId}-${row.createdAt}-${row.id || 'no-id'}`}
               className="p-8 rounded-3xl shadow-lg border-2 transition-all duration-300 hover:scale-105"
@@ -700,14 +709,84 @@ function StatsContent({
                   )}
                 </div>
                 <div className="flex items-center gap-8">
+                  {/* User Info for MMSE Chatbot */}
+                  {isMMSEChatbot && userInfo && (
+                    <div className="text-left mr-4">
+                      <div className="text-sm font-semibold mb-1" style={{ color: '#8B6D57' }}>Thông tin</div>
+                      {userInfo.name && (
+                        <div className="text-base" style={{ color: '#B8763E' }}>{userInfo.name}</div>
+                      )}
+                      {userInfo.age && (
+                        <div className="text-sm" style={{ color: '#8B6D57' }}>
+                          {userInfo.age} tuổi
+                          {userInfo.gender && ` • ${userInfo.gender === 'male' ? 'Nam' : userInfo.gender === 'female' ? 'Nữ' : 'Khác'}`}
+                        </div>
+                      )}
+                      {userInfo.education_years && (
+                        <div className="text-sm" style={{ color: '#8B6D57' }}>
+                          Học vấn: {userInfo.education_years} năm
+                        </div>
+                      )}
+                      {userInfo.city && (
+                        <div className="text-sm" style={{ color: '#8B6D57' }}>
+                          {userInfo.city}{userInfo.district && `, ${userInfo.district}`}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  
                   <div className="text-center">
                     <div className="text-lg font-bold mb-2" style={{ color: '#8B6D57' }}>Điểm MMSE</div>
                     <div className="text-4xl font-bold" style={{ color: '#E88D4D' }}>{row.finalMmseScore ?? 'N/A'}</div>
                   </div>
-                  <div className="text-center">
-                    <div className="text-lg font-bold mb-2" style={{ color: '#8B6D57' }}>Điểm GPT</div>
-                    <div className="text-4xl font-bold" style={{ color: '#E67635' }}>{row.overallGptScore ?? 'N/A'}</div>
-                  </div>
+                  
+                  {/* MCI Probability for MMSE Chatbot */}
+                  {isMMSEChatbot && mciResult && (
+                    <div className="text-center">
+                      <div className="text-lg font-bold mb-2" style={{ color: '#8B6D57' }}>Nguy cơ MCI</div>
+                      <div className="text-3xl font-bold" style={{ 
+                        color: mciResult.mci_probability > 0.6 ? '#E63946' : 
+                                mciResult.mci_probability > 0.3 ? '#F77F00' : '#06D6A0'
+                      }}>
+                        {(mciResult.mci_probability * 100).toFixed(1)}%
+                      </div>
+                      {mciResult.risk_level && (
+                        <div className="text-xs mt-1 px-2 py-1 rounded-full inline-block"
+                          style={{
+                            background: mciResult.risk_level === 'HIGH' ? '#E63946' : 
+                                       mciResult.risk_level === 'MODERATE' ? '#F77F00' : '#06D6A0',
+                            color: '#FFFFFF'
+                          }}>
+                          {mciResult.risk_level === 'HIGH' ? 'CAO' : 
+                           mciResult.risk_level === 'MODERATE' ? 'TRUNG BÌNH' : 'THẤP'}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  
+                  {!isMMSEChatbot && (
+                    <div className="text-center">
+                      <div className="text-lg font-bold mb-2" style={{ color: '#8B6D57' }}>Điểm GPT</div>
+                      <div className="text-4xl font-bold" style={{ color: '#E67635' }}>{row.overallGptScore ?? 'N/A'}</div>
+                    </div>
+                  )}
+                  
+                  {/* Features Summary for MMSE Chatbot */}
+                  {isMMSEChatbot && (acousticFeatures || linguisticData) && (
+                    <div className="text-left text-sm" style={{ color: '#8B6D57' }}>
+                      <div className="font-semibold mb-1">Đặc trưng</div>
+                      {acousticFeatures && (
+                        <div>Âm thanh: {Object.keys(acousticFeatures).length} features</div>
+                      )}
+                      {linguisticData && (
+                        <div>
+                          Ngôn ngữ: TTR {linguisticData.ttr?.toFixed(2) || 'N/A'}, 
+                          MLU {linguisticData.mlu?.toFixed(1) || 'N/A'}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  
                   <div className="ml-auto">
                     <Link href={`/results/${encodeURIComponent(row.sessionId)}`}>
                       <button className="px-8 py-4 rounded-2xl font-bold text-lg transition-all duration-300 hover:scale-105 shadow-lg"
@@ -723,7 +802,8 @@ function StatsContent({
                 </div>
               </div>
             </motion.div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

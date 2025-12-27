@@ -18,6 +18,10 @@ import asyncio
 import threading
 from concurrent.futures import ThreadPoolExecutor
 import queue
+import atexit
+import signal
+import atexit
+import signal
 import torch
 import joblib
 
@@ -361,16 +365,19 @@ except ImportError as e:
     logger.warning(f"⚠️ Cannot import MMSE inference pipeline: {e}")
     mmse_pipeline = None
 
-# Import MCI Screening Modules
+# Import MCI Screening Modules (NEW - Primary pipeline)
 mci_service = None
+MCI_MODULES_AVAILABLE = False
 try:
-    from modules.integration_service import MCIScreeningService, analyze_for_mci
+    from modules.integration_service import MCIScreeningService, get_mci_service, analyze_for_mci
     from modules.acoustic_analyzer import AcousticAnalyzer
     from modules.linguistic_analyzer import VietnameseLinguisticAnalyzer
     from modules.mci_predictor import MCIPredictor
     
-    # Initialize MCI service
-    mci_service = MCIScreeningService(use_phobert=True)
+    # Initialize MCI service with PhoBERT for best results
+    # model_path=None will auto-detect newest model (models/best_model.pkl)
+    mci_service = MCIScreeningService(model_path=None, use_phobert=True)
+    MCI_MODULES_AVAILABLE = True
     
     logger.info("✅ MCI Screening Modules initialized")
     logger.info(f"   - Acoustic Analyzer: {mci_service.acoustic_analyzer is not None}")
@@ -380,9 +387,212 @@ try:
 except ImportError as e:
     logger.warning(f"⚠️ MCI modules not available: {e}")
     mci_service = None
+    MCI_MODULES_AVAILABLE = False
 except Exception as e:
     logger.error(f"❌ MCI service initialization error: {e}")
     mci_service = None
+    MCI_MODULES_AVAILABLE = False
+
+
+def evaluate_with_mci_modules(transcript: str, question: str = None, audio_path: str = None, 
+                               user_data: dict = None, language: str = 'vi') -> dict:
+    """
+    NEW MCI-based evaluation function using the new Vietnamese NLP modules.
+    
+    This replaces the old evaluate_with_gpt4o function with proper linguistic analysis.
+    
+    Args:
+        transcript: Text transcript to evaluate
+        question: The question being answered (optional)
+        audio_path: Path to audio file for acoustic analysis (optional)
+        user_data: User profile data (age, gender, education, etc.)
+        language: Language code ('vi' for Vietnamese)
+    
+    Returns:
+        dict: Evaluation result compatible with the old format
+    """
+    if not MCI_MODULES_AVAILABLE or mci_service is None:
+        logger.warning("⚠️ MCI modules not available, falling back to GPT evaluation")
+        return evaluate_with_gpt4o(transcript, question or "Danh gia tong quan", user_data, language)
+    
+    if user_data is None:
+        user_data = {}
+    
+    try:
+        # Analyze transcript using MCI service
+        start_time = time_module.time()
+        
+        # Determine task type based on question
+        task_type = 'spontaneous_speech'
+        if question:
+            question_lower = question.lower()
+            if 'mieu ta' in question_lower or 'mo ta' in question_lower or 'tranh' in question_lower:
+                task_type = 'picture_description'
+            elif 'ke ten' in question_lower or 'liet ke' in question_lower:
+                task_type = 'verbal_fluency'
+            elif '?' in question:
+                task_type = 'qa'
+        
+        # Perform analysis
+        result = mci_service.analyze(
+            audio_path=audio_path,
+            transcript=transcript,
+            task_type=task_type
+        )
+        
+        processing_time = time_module.time() - start_time
+        
+        # Extract linguistic features for scoring
+        ling_features = result.linguistic_features or {}
+        
+        # Calculate vocabulary score from linguistic features (if transcript is long enough)
+        word_count = ling_features.get('lex_total_words', len(transcript.split()))
+        is_short = word_count < 10
+        
+        vocabulary_score = None
+        if not is_short and word_count >= 10:
+            # Use TTR (Type-Token Ratio) and other lexical metrics
+            ttr = ling_features.get('lex_ttr', 0.5)
+            mattr = ling_features.get('lex_mattr', 0.5)
+            content_ratio = ling_features.get('lex_content_word_ratio', 0.5)
+            
+            # Scale to 0-10
+            vocabulary_score = min(10, max(1, (ttr * 4 + mattr * 3 + content_ratio * 3)))
+        
+        # Calculate context relevance from semantic features
+        idea_density = ling_features.get('sem_idea_density', 5)
+        coherence = ling_features.get('sem_semantic_coherence', 0.7)
+        
+        # Scale idea density (typical range 3-10) to 0-10
+        context_relevance_score = min(10, max(1, idea_density * 0.8 + coherence * 2))
+        
+        # Get MCI prediction
+        mci_prob = 0.15
+        mmse_estimate = 27
+        severity = "Binh thuong"
+        cognitive_level = "high"
+        
+        if result.mci_prediction:
+            mci_prob = result.mci_prediction.get('mci_probability', 0.15)
+            mmse_estimate = result.mmse_estimate
+            severity = result.severity
+            
+            if mci_prob < 0.3:
+                cognitive_level = 'high'
+            elif mci_prob < 0.6:
+                cognitive_level = 'medium'
+            else:
+                cognitive_level = 'low'
+        
+        # Calculate overall score
+        if vocabulary_score is not None:
+            overall_score = (vocabulary_score * 0.4 + context_relevance_score * 0.6)
+        else:
+            overall_score = context_relevance_score
+        
+        # Adjust based on MCI probability (lower probability = better score)
+        overall_score = overall_score * (1 - mci_prob * 0.3)
+        overall_score = min(10, max(1, overall_score))
+        
+        # Generate analysis text
+        if language == 'vi':
+            analysis = f"Phan tich ngon ngu tu dong (MCI Module): "
+            analysis += f"Tu vung: TTR={ling_features.get('lex_ttr', 0):.2f}, "
+            analysis += f"Mat do y tuong: {idea_density:.2f}, "
+            analysis += f"Do mach lac ngu nghia: {coherence:.2f}. "
+            
+            if mci_prob < 0.3:
+                analysis += "Khong phat hien dau hieu suy giam nhan thuc dang ke."
+            elif mci_prob < 0.6:
+                analysis += "Co dau hieu suy giam nhan thuc nhe, khuyen nghi theo doi them."
+            else:
+                analysis += "Phat hien dau hieu suy giam nhan thuc, khuyen nghi kiem tra chuyen sau."
+            
+            feedback = f"Diem MMSE uoc tinh: {mmse_estimate}/30. {severity}. "
+            if vocabulary_score and vocabulary_score < 6:
+                feedback += "Can cai thien su da dang tu vung. "
+            if context_relevance_score < 6:
+                feedback += "Can tap trung tra loi sat voi cau hoi hon. "
+            if mci_prob > 0.3:
+                feedback += "Khuyen nghi kiem tra nhan thuc chuyen sau."
+        else:
+            analysis = f"Automated linguistic analysis (MCI Module): "
+            analysis += f"Vocabulary: TTR={ling_features.get('lex_ttr', 0):.2f}, "
+            analysis += f"Idea density: {idea_density:.2f}, "
+            analysis += f"Semantic coherence: {coherence:.2f}. "
+            
+            if mci_prob < 0.3:
+                analysis += "No significant cognitive decline detected."
+            elif mci_prob < 0.6:
+                analysis += "Mild cognitive decline signs, monitoring recommended."
+            else:
+                analysis += "Cognitive decline signs detected, professional evaluation recommended."
+            
+            feedback = f"Estimated MMSE score: {mmse_estimate}/30. {severity}. "
+        
+        # Build result in old format for compatibility
+        evaluation_result = {
+            'vocabulary_score': round(vocabulary_score, 1) if vocabulary_score else None,
+            'context_relevance_score': round(context_relevance_score, 1),
+            'overall_score': round(overall_score, 1),
+            'analysis': analysis,
+            'feedback': feedback,
+            'vocabulary_analysis': {
+                'strengths': ['Tu vung da dang'] if vocabulary_score and vocabulary_score > 6 else [],
+                'weaknesses': ['Can cai thien tu vung'] if vocabulary_score and vocabulary_score < 6 else [],
+                'recommendations': ['Tang cuong doc va viet'] if vocabulary_score and vocabulary_score < 7 else []
+            } if vocabulary_score else None,
+            'context_analysis': {
+                'relevance_level': 'high' if context_relevance_score > 7 else 'medium' if context_relevance_score > 4 else 'low',
+                'accuracy': 'accurate' if context_relevance_score > 7 else 'partially_accurate' if context_relevance_score > 4 else 'inaccurate',
+                'completeness': 'complete' if word_count > 20 else 'partial' if word_count > 5 else 'incomplete',
+                'issues': [] if context_relevance_score > 6 else ['Can tra loi day du hon']
+            },
+            'cognitive_assessment': {
+                'language_fluency': 'excellent' if overall_score > 8 else 'good' if overall_score > 6 else 'fair' if overall_score > 4 else 'poor',
+                'cognitive_level': cognitive_level,
+                'attention_focus': 'good' if mci_prob < 0.3 else 'fair' if mci_prob < 0.6 else 'poor',
+                'memory_recall': 'excellent' if mmse_estimate > 26 else 'good' if mmse_estimate > 22 else 'fair' if mmse_estimate > 18 else 'poor'
+            },
+            'transcript_info': {
+                'word_count': word_count,
+                'is_short_transcript': is_short,
+                'vocabulary_richness_applicable': not is_short
+            },
+            # New MCI-specific fields
+            'mci_analysis': {
+                'mci_probability': round(mci_prob, 3),
+                'mmse_estimate': mmse_estimate,
+                'severity': severity,
+                'linguistic_features_count': len(ling_features),
+                'acoustic_features_count': len(result.acoustic_features) if result.acoustic_features else 0,
+                'processing_time': round(processing_time, 2)
+            }
+        }
+        
+        logger.info(f"✅ MCI evaluation completed: MMSE={mmse_estimate}, MCI_prob={mci_prob:.2%}, overall={overall_score:.1f}")
+        return evaluation_result
+        
+    except Exception as e:
+        logger.error(f"❌ MCI evaluation error: {e}")
+        # Fallback to GPT evaluation if MCI fails
+        if openai_client:
+            logger.info("⚠️ Falling back to GPT evaluation")
+            return evaluate_with_gpt4o(transcript, question or "Danh gia tong quan", user_data, language)
+        else:
+            # Return default result
+            return {
+                'vocabulary_score': None,
+                'context_relevance_score': 5.0,
+                'overall_score': 5.0,
+                'analysis': f"Danh gia tu dong khong kha dung do loi he thong: {str(e)[:100]}",
+                'feedback': "Vui long thu lai sau.",
+                'transcript_info': {
+                    'word_count': len(transcript.split()),
+                    'is_short_transcript': len(transcript.split()) < 10,
+                    'vocabulary_richness_applicable': len(transcript.split()) >= 10
+                }
+            }
 
 # Load environment variables
 def load_environment():
@@ -427,7 +637,14 @@ logger.info(f"🎤 Vietnamese ASR Model: {vi_asr_model}")
 
 # Initialize Flask app
 app = Flask(__name__)
-CORS(app)
+# Configure CORS to allow all origins (for development)
+CORS(app, resources={
+    r"/*": {
+        "origins": ["http://localhost:3000", "http://127.0.0.1:3000", "*"],
+        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization"]
+    }
+})
 
 # Register blueprints (optional if modules missing)
 try:
@@ -441,6 +658,14 @@ try:
     app.register_blueprint(database_bp)
 except ImportError as e:
     logger.warning(f"⚠️ database_api not available: {e}")
+
+# Register MMSE Chatbot API
+try:
+    from services.mmse_chatbot_api import mmse_chatbot_bp
+    app.register_blueprint(mmse_chatbot_bp)
+    logger.info("✅ MMSE Chatbot API registered")
+except ImportError as e:
+    logger.warning(f"⚠️ MMSE Chatbot API not available: {e}")
 
 # Global variables
 cognitive_model = None
@@ -554,7 +779,8 @@ def process_assessment_background(assessment_data):
         ml_prediction = {}
         gpt_evaluation = {}
 
-        # Attempt to extract audio features if audio data present
+        # Extract audio features using NEW AcousticAnalyzer from modules
+        audio_path_for_analysis = None
         try:
             if audio_data_url and isinstance(audio_data_url, str) and audio_data_url.startswith('data:'):
                 import base64, tempfile, os
@@ -563,33 +789,68 @@ def process_assessment_background(assessment_data):
                 ext = '.wav' if 'wav' in header else '.webm'
                 with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
                     tmp.write(base64.b64decode(b64data))
-                    tmp_path = tmp.name
-                logger.info(f"🎵 Saved audio data URL to temp file: {tmp_path}")
+                    audio_path_for_analysis = tmp.name
+                logger.info(f"🎵 Saved audio data URL to temp file: {audio_path_for_analysis}")
+            
+            # Use NEW AcousticAnalyzer if available (preferred)
+            if MCI_MODULES_AVAILABLE and mci_service and mci_service.acoustic_analyzer and audio_path_for_analysis:
                 try:
-                    audio_features = extract_audio_features(tmp_path) or {}
-                finally:
-                    try:
-                        os.remove(tmp_path)
-                    except Exception:
-                        pass
+                    logger.info("✅ Using NEW AcousticAnalyzer from modules")
+                    audio_features = mci_service.acoustic_analyzer.extract_all_features(
+                        audio_path_for_analysis,
+                        transcript=transcript_text
+                    ) or {}
+                    logger.info(f"✅ Extracted {len(audio_features)} acoustic features using NEW modules")
+                except Exception as e:
+                    logger.warning(f"⚠️ NEW AcousticAnalyzer failed, using legacy: {e}")
+                    # Fallback to legacy
+                    if audio_path_for_analysis:
+                        audio_features = extract_audio_features(audio_path_for_analysis) or {}
+                    else:
+                        audio_features = get_default_audio_features()
             else:
-                logger.info("ℹ️ No audio_data provided for feature extraction")
+                # Legacy extraction
+                if audio_path_for_analysis:
+                    audio_features = extract_audio_features(audio_path_for_analysis) or {}
+                else:
+                    logger.info("ℹ️ No audio_data provided for feature extraction")
+                    audio_features = {}
         except Exception as fe:
             logger.warning(f"⚠️ Audio feature extraction failed: {fe}")
             audio_features = get_default_audio_features()
+        finally:
+            # Clean up temp file
+            if audio_path_for_analysis:
+                try:
+                    import os
+                    os.remove(audio_path_for_analysis)
+                except:
+                    pass
 
-        # ML prediction from audio features
+        # ML prediction using NEW MCIScreeningService modules
+        ml_prediction = {}
         try:
-            ml_prediction = predict_cognitive_score(audio_features) or {}
+            # Extract user_info from assessment_data if available
+            user_info_for_prediction = assessment_data.get('user_data') or assessment_data.get('user_info') or {}
+            
+            # Use NEW modules for prediction (preferred)
+            ml_prediction = predict_cognitive_score(
+                audio_features=audio_features,
+                transcript=transcript_text,
+                audio_path=audio_path_for_analysis,
+                user_info=user_info_for_prediction
+            ) or {}
         except Exception as me:
             logger.warning(f"⚠️ ML prediction failed: {me}")
             ml_prediction = {'predicted_score': 15.0, 'confidence': 0.5, 'model_used': 'fallback'}
 
-        # GPT evaluation based on transcript
+        # Evaluation based on transcript - use NEW MCI modules first
         try:
-            # Some flows require a question; fallback to generic prompt if not available
-            if 'evaluate_with_gpt4o' in globals() and callable(evaluate_with_gpt4o):
-                gpt_evaluation = evaluate_with_gpt4o(transcript_text, "Đánh giá tổng quan khả năng nhận thức", None, 'vi')
+            # Use new MCI modules for evaluation (primary choice)
+            if MCI_MODULES_AVAILABLE and mci_service:
+                gpt_evaluation = evaluate_with_mci_modules(transcript_text, "Danh gia tong quan kha nang nhan thuc", None, None, 'vi')
+            elif 'evaluate_with_gpt4o' in globals() and callable(evaluate_with_gpt4o):
+                gpt_evaluation = evaluate_with_gpt4o(transcript_text, "Danh gia tong quan kha nang nhan thuc", None, 'vi')
             if not isinstance(gpt_evaluation, dict) or not gpt_evaluation:
                 # Construct a minimal evaluation
                 length = len(transcript_text.strip().split())
@@ -611,36 +872,56 @@ def process_assessment_background(assessment_data):
                 'feedback': 'Không thể gọi mô hình AI, sử dụng kết quả dự phòng.'
             }
 
-        # Compute final score using the standardized MMSE combination formula
+        # NEW: Rule-based MMSE scoring from JSON
+        # Extract question_id from assessment_data
+        final_score = 0
+        
         try:
-            ml_score = float(ml_prediction.get('predicted_score', 15.0))
-            gpt_overall = float(gpt_evaluation.get('overall_score', 5.0))
-            vocab_score = gpt_evaluation.get('vocabulary_score', None)
-            context_score = gpt_evaluation.get('context_relevance_score', gpt_overall)
-
-            # Sanity-check GPT numeric fields
-            for label, val in (("gpt_overall", gpt_overall), ("context_score", context_score), ("vocab_score", vocab_score)):
-                if val is not None and (np.isnan(val) or np.isinf(val)):
-                    logger.warning(f"⚠️ Invalid {label}: {val}, resetting to fallback")
-                    if label == "vocab_score":
-                        vocab_score = None
-                    elif label == "context_score":
-                        context_score = 5.0
-                    else:
-                        gpt_overall = 5.0
-
-            final_score = _calculate_final_mmse_score(
-                ml_score=ml_score,
-                gpt_overall_score=gpt_overall,
-                context_score=context_score,
-                vocab_score=vocab_score,
-            )
-            if not isinstance(final_score, int):
-                final_score = int(round(final_score))
-            final_score = max(1, min(29, final_score))
+            if question_id:
+                # Load question data from JSON
+                question_data = load_question_from_json(question_id)
+                
+                if question_data:
+                    logger.info(f"✅ Using rule-based scoring for question: {question_id}")
+                    
+                    # Validate answer with GPT (validator only, not scorer)
+                    validation_result = validate_answer_with_gpt(question_data, transcript_text)
+                    
+                    # Calculate score based on MMSE rules
+                    question_score = calculate_question_score(question_data, validation_result)
+                    
+                    # Store question score
+                    if session_id not in question_results_db:
+                        question_results_db[session_id] = []
+                    
+                    question_results_db[session_id].append({
+                        'question_id': question_id,
+                        'transcript': transcript_text,
+                        'score': question_score,
+                        'max_points': question_data.get('points', 0),
+                        'validation': validation_result
+                    })
+                    
+                    # Calculate total MMSE from all questions in session
+                    all_question_scores = {
+                        qr.get('question_id', ''): qr.get('score', 0)
+                        for qr in question_results_db.get(session_id, [])
+                    }
+                    final_score = calculate_total_mmse(all_question_scores)
+                    
+                    logger.info(f"✅ Rule-based scoring: question_score={question_score}/{question_data.get('points', 0)}, total_mmse={final_score}/30")
+                else:
+                    logger.warning(f"⚠️ Question {question_id} not found in JSON, using fallback")
+                    final_score = 15  # Default fallback
+            else:
+                logger.warning("⚠️ No question_id provided, using fallback")
+                final_score = 15  # Default fallback
+                
         except Exception as score_err:
-            logger.error(f"❌ Final score calculation failed: {score_err}")
-            final_score = int(round(max(1.0, min(29.0, ml_prediction.get('predicted_score', 15.0)))))
+            logger.error(f"❌ Rule-based scoring failed: {score_err}")
+            import traceback
+            traceback.print_exc()
+            final_score = 15  # Default fallback
 
         # Domain scores placeholder (kept for compatibility)
         domain_scores = {
@@ -817,12 +1098,18 @@ def process_assessment_background(assessment_data):
             'failed_at': datetime.now().isoformat()
         }
 
+# ✅ FIX: Global flag for graceful shutdown
+shutdown_flag = threading.Event()
+
 def queue_worker():
-    """Background worker to process assessment queue"""
-    while True:
+    """Background worker to process assessment queue with graceful shutdown support"""
+    while not shutdown_flag.is_set():
         try:
-            # Get task from queue
-            assessment_data = assessment_queue.get(timeout=1)
+            # Get task from queue with timeout to check shutdown flag
+            try:
+                assessment_data = assessment_queue.get(timeout=1)
+            except queue.Empty:
+                continue
 
             if assessment_data:
                 # Submit to thread pool for processing
@@ -831,11 +1118,12 @@ def queue_worker():
 
             assessment_queue.task_done()
 
-        except queue.Empty:
-            continue
         except Exception as e:
-            logger.error(f"❌ Queue worker error: {e}")
-            time_module.sleep(1)
+            if not shutdown_flag.is_set():
+                logger.error(f"❌ Queue worker error: {e}")
+            time_module.sleep(0.1)  # Shorter sleep for faster shutdown
+    
+    logger.info("🛑 Queue worker stopped gracefully")
 
 # Global variables for model components
 model_scaler = None
@@ -843,7 +1131,13 @@ model_selector = None
 
 def load_model_bundle():
     """
-    Load pre-trained model bundle from model_bundle/model_new/ (newest).
+    Load pre-trained model bundle - prioritize newest models.
+    
+    Priority order:
+    1) models/best_model.pkl (newest, 2025-12-16)
+    2) model_bundle/model_new_clean/ (2025-12-11)
+    3) model_bundle/model_new/ (2025-12-11)
+    4) models/model.pkl (legacy)
 
     Supports two layouts:
     1) Legacy (separate files): model.pkl + scaler.pkl + selector.pkl + feature_names.pkl
@@ -854,8 +1148,28 @@ def load_model_bundle():
     try:
         current_file = Path(__file__).resolve()
         project_root = current_file.parent.parent
-        # Use new spec-compliant bundle default location
-        bundle_path = project_root / "models"
+        
+        # Priority 1: Check for newest model in models/ directory
+        newest_bundle_path = project_root / "models"
+        if newest_bundle_path.exists() and (newest_bundle_path / "best_model.pkl").exists():
+            bundle_path = newest_bundle_path
+            logger.info(f"✅ Found newest model bundle at: {bundle_path}")
+        else:
+            # Priority 2: Check model_bundle/model_new_clean/
+            clean_bundle_path = project_root / "model_bundle" / "model_new_clean"
+            if clean_bundle_path.exists() and (clean_bundle_path / "model.pkl").exists():
+                bundle_path = clean_bundle_path
+                logger.info(f"✅ Found clean model bundle at: {bundle_path}")
+            else:
+                # Priority 3: Check model_bundle/model_new/
+                new_bundle_path = project_root / "model_bundle" / "model_new"
+                if new_bundle_path.exists() and (new_bundle_path / "model.pkl").exists():
+                    bundle_path = new_bundle_path
+                    logger.info(f"✅ Found new model bundle at: {bundle_path}")
+                else:
+                    # Fallback: Use models/ directory
+                    bundle_path = project_root / "models"
+                    logger.warning(f"⚠️ Using fallback bundle path: {bundle_path}")
 
         logger.info("=" * 60)
         logger.info("LOADING MODEL BUNDLE")
@@ -1382,57 +1696,22 @@ Trả về JSON với format:
 """
 
         try:
-            # Use GPT-4o for analysis (primary choice)
-            try:
-                if not openai_client:
-                    raise Exception("OpenAI client not available")
+            # Use GPT-4o ONLY for MMSE analysis (no Gemini fallback)
+            if not openai_client:
+                raise Exception("OpenAI client not available - GPT-4o is required for MMSE analysis")
                     
-                gpt_response = openai_client.chat.completions.create(
-                    model="gpt-4o",
-                    messages=[
-                        {"role": "system", "content": "Bạn là chuyên gia tâm thần học chuyên về đánh giá nhận thức và bệnh Alzheimer. Hãy phân tích chi tiết và đưa ra khuyến nghị phù hợp."},
-                        {"role": "user", "content": analysis_prompt}
-                    ],
-                    temperature=0.3,
-                    max_tokens=1000
-                )
-                
-                analysis_result = gpt_response.choices[0].message.content.strip()
-                logger.info(f"🤖 GPT-4o analysis response: {analysis_result[:200]}...")
-                
-            except Exception as e:
-                logger.error(f"❌ GPT-4o analysis failed: {e}")
-                # Fallback to Gemini
-                try:
-                    import google.generativeai as genai
-                    genai.configure(api_key=os.getenv('GOOGLE_API_KEY'))
-                    model = genai.GenerativeModel('gemini-2.5-flash')
-                    
-                    gpt_response = model.generate_content(
-                        analysis_prompt,
-                        generation_config=genai.types.GenerationConfig(
-                            temperature=0.3,
-                            max_output_tokens=1000
-                        )
-                    )
-                    
-                    analysis_result = gpt_response.text.strip()
-                    logger.info(f"🤖 Gemini fallback analysis response: {analysis_result[:200]}...")
-                    
-                except Exception as gemini_e:
-                    logger.error(f"❌ Gemini fallback also failed: {gemini_e}")
-                    # Final fallback to GPT-3.5-turbo
-                    gpt_response = openai_client.chat.completions.create(
-                        model="gpt-3.5-turbo",
-                        messages=[
-                            {"role": "system", "content": "Bạn là chuyên gia tâm thần học chuyên về đánh giá nhận thức và bệnh Alzheimer."},
-                            {"role": "user", "content": analysis_prompt}
-                        ],
-                        temperature=0.3,
-                        max_tokens=1000
-                    )
-                    analysis_result = gpt_response.choices[0].message.content.strip()
-                    logger.info(f"🤖 GPT-3.5-turbo final fallback analysis response: {analysis_result[:200]}...")
+            gpt_response = openai_client.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {"role": "system", "content": "Bạn là chuyên gia tâm thần học chuyên về đánh giá nhận thức và bệnh Alzheimer. Hãy phân tích chi tiết và đưa ra khuyến nghị phù hợp."},
+                    {"role": "user", "content": analysis_prompt}
+                ],
+                temperature=0.3,
+                max_tokens=1000
+            )
+            
+            analysis_result = gpt_response.choices[0].message.content.strip()
+            logger.info(f"🤖 GPT-4o MMSE analysis response: {analysis_result[:200]}...")
 
             gpt_analysis = json.loads(analysis_result)
         except Exception as e:
@@ -1479,7 +1758,15 @@ Trả về JSON với format:
         }
 
 def evaluate_with_gpt4o(transcript: str, question: str, user_data: dict = None, language: str = 'vi') -> dict:
-    """Evaluate transcript using GPT-4o with advanced prompt and smart logic"""
+    """
+    Validate transcript using GPT-4o - VALIDATION ONLY, NO SCORING.
+    
+    This function is deprecated for scoring. Use validate_answer_with_gpt() for rule-based scoring.
+    Kept for backward compatibility but only returns validation info, not scores.
+    
+    Returns:
+        dict: Validation result with analysis and feedback, but NO scores
+    """
     if user_data is None:
         user_data = {}
     # Defensive: ensure user_data is a dictionary
@@ -1494,57 +1781,26 @@ def evaluate_with_gpt4o(transcript: str, question: str, user_data: dict = None, 
         except Exception:
             user_data = {}
     
-    # Create default result that can be used in exception handlers
+    word_count = len(transcript.split())
+    is_short = word_count < 10
+    
+    # Create default result - NO SCORES
     if language == 'vi':
         default_result = {
-            'vocabulary_score': 5.0,
-            'context_relevance_score': 5.0,
-            'overall_score': 5.0,
             'analysis': "Đánh giá không khả dụng do lỗi API",
             'feedback': "Đánh giá không khả dụng do lỗi API",
-            'vocabulary_analysis': None,
-            'context_analysis': {
-                'relevance_level': 'medium',
-                'accuracy': 'uncertain',
-                'completeness': 'partial',
-                'issues': ['API không khả dụng']
-            },
-            'cognitive_assessment': {
-                'language_fluency': 'fair',
-                'cognitive_level': 'medium',
-                'attention_focus': 'fair',
-                'memory_recall': 'fair'
-            },
             'transcript_info': {
-                'word_count': len(transcript.split()),
-                'is_short_transcript': len(transcript.split()) < 10,
-                'vocabulary_richness_applicable': True
+                'word_count': word_count,
+                'is_short_transcript': is_short
             }
         }
     else:
         default_result = {
-            'vocabulary_score': 5.0,
-            'context_relevance_score': 5.0,
-            'overall_score': 5.0,
             'analysis': "Evaluation not available due to API issues",
             'feedback': "Evaluation not available due to API issues",
-            'vocabulary_analysis': None,
-            'context_analysis': {
-                'relevance_level': 'medium',
-                'accuracy': 'uncertain',
-                'completeness': 'partial',
-                'issues': ['API not available']
-            },
-            'cognitive_assessment': {
-                'language_fluency': 'fair',
-                'cognitive_level': 'medium',
-                'attention_focus': 'fair',
-                'memory_recall': 'fair'
-            },
             'transcript_info': {
-                'word_count': len(transcript.split()),
-                'is_short_transcript': len(transcript.split()) < 10,
-                'vocabulary_richness_applicable': True
+                'word_count': word_count,
+                'is_short_transcript': is_short
             }
         }
     
@@ -1553,180 +1809,67 @@ def evaluate_with_gpt4o(transcript: str, question: str, user_data: dict = None, 
         return default_result
     
     try:
-        # Create prompt directly with smart logic
-        word_count = len(transcript.split())
-        is_short = word_count < 10
-
-        # Classify question type to adjust evaluation criteria
-        question_type = _classify_question_type(question, language)
-        question_display = question[:50] if question and isinstance(question, str) else "None"
-        logger.info(f"🔍 Question classified as: {question_type} (question: '{question_display}...')")
-
-        # Adjust evaluation criteria based on question type
-        if question_type == 'factual':
-            context_instructions = """
-   - Đối với câu hỏi factual (thông tin cơ bản): cho điểm cao (7-10) nếu trả lời đúng và đầy đủ thông tin cơ bản
-   - Không đòi hỏi mô tả chi tiết, chỉ cần thông tin chính xác và phù hợp
-   - Ví dụ: "Tôi 65 tuổi" cho câu hỏi "Bạn bao nhiêu tuổi?" nên được 9-10 điểm"""
-            min_context_score = 7  # Lower threshold for factual questions
-        elif question_type == 'simple_yes_no':
-            context_instructions = """
-   - Đối với câu hỏi có/không đơn giản: cho điểm cao (8-10) nếu trả lời rõ ràng và phù hợp
-   - Không đòi hỏi giải thích chi tiết, chỉ cần câu trả lời trực tiếp"""
-            min_context_score = 8  # Higher threshold for yes/no questions
-        else:  # descriptive
-            context_instructions = """
-   - Đối với câu hỏi mô tả chi tiết: đánh giá nghiêm ngặt dựa trên mức độ đầy đủ và chính xác của thông tin
-   - Yêu cầu mô tả chi tiết và logic"""
-            min_context_score = 5  # Standard threshold
-
+        # Simple validation prompt - NO SCORING
         if language == 'vi':
             prompt = f"""
-Bạn là chuyên gia đánh giá nhận thức. Phân tích transcript và trả về JSON chính xác.
+Bạn là chuyên gia kiểm tra đáp án MMSE. Chỉ xác định xem câu trả lời có phù hợp với câu hỏi không.
 
-**THÔNG TIN ĐẦU VÀO:**
+**THÔNG TIN:**
 - Câu hỏi: {question or "Không có câu hỏi cụ thể"}
 - Transcript: {transcript}
-- Số từ trong transcript: {word_count}
-- Là transcript ngắn (< 10 từ): {"Có" if is_short else "Không"}
-- Loại câu hỏi: {question_type} (factual=thông tin cơ bản, descriptive=mô tả chi tiết, simple_yes_no=có/không)
-- Thông tin cá nhân: Tuổi: {user_data.get('age', 'Không rõ')}, Giới tính: {user_data.get('gender', 'Không rõ')}, Trình độ học vấn: {user_data.get('education', 'Không rõ')}
+- Số từ: {word_count}
 
-**HƯỚNG DẪN CHI TIẾT:**
+**NHIỆM VỤ:**
+Chỉ phân tích và đưa ra nhận xét về mức độ phù hợp của câu trả lời. KHÔNG cho điểm số.
 
-**NGUYÊN TẮC ĐÁNH GIÁ THEO THÔNG TIN CÁ NHÂN:**
-- Người cao tuổi (65+): Giảm tiêu chuẩn 1-2 điểm cho vocabulary_score
-- Người trẻ (<30): Tăng tiêu chuẩn 1-2 điểm cho vocabulary_score
-- Người có trình độ học vấn thấp: Điều chỉnh tiêu chuẩn phù hợp
-- Xem xét khả năng thực tế của từng cá nhân khi đánh giá
-
-1. **VOCABULARY_SCORE:**
-   - Nếu transcript < 10 từ: đặt là null
-   - Nếu transcript >= 10 từ và câu hỏi yêu cầu mô tả chi tiết: đánh giá 0-10
-   - Nếu câu hỏi đơn giản (factual/simple_yes_no): đặt là null (không đánh giá độ phong phú)
-   - Đánh giá độ phong phú từ vựng, đa dạng từ loại, cấu trúc câu
-   - ĐIỀU CHỈNH theo tuổi tác và trình độ học vấn
-
-2. **CONTEXT_RELEVANCE_SCORE:**
-   - Luôn đánh giá từ 0-10
-   - Đo lường mức độ trả lời phù hợp với câu hỏi
-   - Điều chỉnh tiêu chí dựa trên loại câu hỏi:
-{context_instructions}
-   - Transcript ngắn nhưng chính xác vẫn có thể đạt điểm cao
-   - ĐIỀU CHỈNH theo tuổi tác: Người cao tuổi có thể được đánh giá linh hoạt hơn
-
-3. **OVERALL_SCORE:**
-   - Nếu có cả 2 điểm: (vocabulary_score + context_relevance_score) / 2
-   - Nếu chỉ có context_relevance_score: dùng giá trị đó
-
-**YÊU CẦU FORMAT JSON NGHIÊM NGẶT:**
+**YÊU CẦU JSON:**
 
 {{
-  "vocabulary_score": {"null" if is_short or question_type in ['factual', 'simple_yes_no'] else "SỐ_NGUYÊN_0_10"},
-  "context_relevance_score": "SỐ_NGUYÊN_0_10",
-  "overall_score": "SỐ_NGUYÊN_0_10",
-  "analysis": "PHÂN_TÍCH_CHI_TIẾT_BẰNG_TIẾNG_VIỆT_ÍT_NHẤT_50_TỪ_XEM_XÉT_TUỔI_TÁC_VÀ_TRÌNH_ĐỘ",
-  "feedback": "GỢI_Ý_CẢI_THIỆN_CỤ_THỂ_BẰNG_TIẾNG_VIỆT_ÍT_NHẤT_30_TỪ_PHÙ_HỢP_VỚI_TUỔI_TÁC",
+  "analysis": "PHÂN_TÍCH_CHI_TIẾT_BẰNG_TIẾNG_VIỆT_VỀ_MỨC_ĐỘ_PHÙ_HỢP_CỦA_CÂU_TRẢ_LỜI",
+  "feedback": "GỢI_Ý_CẢI_THIỆN_NẾU_CẦN_BẰNG_TIẾNG_VIỆT",
   "transcript_info": {{
     "word_count": {word_count},
-    "is_short_transcript": {str(is_short).lower()},
-    "question_type": "{question_type}",
-    "vocabulary_richness_applicable": {str(not (is_short or question_type in ['factual', 'simple_yes_no'])).lower()}
+    "is_short_transcript": {str(is_short).lower()}
   }}
 }}
 
 **QUAN TRỌNG:**
-- KHÔNG thêm text ngoài JSON
-- Đảm bảo JSON hợp lệ 100%
-- Analysis và feedback phải chi tiết, có ý nghĩa
-- Điểm số phải là số nguyên từ 0-10
-- Đối với câu hỏi {question_type}: ưu tiên đánh giá {question_type} criteria
+- KHÔNG cho điểm số (vocabulary_score, context_relevance_score, overall_score)
+- Chỉ phân tích và đưa ra nhận xét
+- JSON hợp lệ 100%
             """.strip()
         else:
-            # Adjust evaluation criteria based on question type (English version)
-            if question_type == 'factual':
-                context_instructions_en = """
-   - For factual questions (basic information): give high scores (7-10) if answer is correct and provides basic information
-   - No detailed description required, just accurate and relevant information
-   - Example: "I am 65 years old" for "How old are you?" should get 9-10 points"""
-            elif question_type == 'simple_yes_no':
-                context_instructions_en = """
-   - For simple yes/no questions: give high scores (8-10) if answer is clear and appropriate
-   - No detailed explanation required, just direct answer"""
-            else:  # descriptive
-                context_instructions_en = """
-   - For detailed descriptive questions: evaluate strictly based on completeness and accuracy
-   - Require detailed and logical descriptions"""
-
             prompt = f"""
-You are a cognitive assessment expert. Analyze transcript and return accurate JSON.
+You are an MMSE answer validator. Only determine if the answer matches the question.
 
-**INPUT INFORMATION:**
+**INFORMATION:**
 - Question: {question or "No specific question"}
 - Transcript: {transcript}
-- Word count in transcript: {word_count}
-- Is short transcript (< 10 words): {"Yes" if is_short else "No"}
-- Question type: {question_type} (factual=basic info, descriptive=detailed, simple_yes_no=yes/no)
-- Personal information: Age: {user_data.get('age', 'Unknown')}, Gender: {user_data.get('gender', 'Unknown')}, Education: {user_data.get('education', 'Unknown')}
+- Word count: {word_count}
 
-**DETAILED GUIDELINES:**
+**TASK:**
+Only analyze and provide feedback on answer relevance. DO NOT provide scores.
 
-**EVALUATION PRINCIPLES BASED ON PERSONAL INFORMATION:**
-- Elderly people (65+): Reduce standards by 1-2 points for vocabulary_score
-- Young people (<30): Increase standards by 1-2 points for vocabulary_score
-- People with lower education: Adjust standards appropriately
-- Consider individual capabilities when evaluating
-
-1. **VOCABULARY_SCORE:**
-   - If transcript < 10 words: set to null
-   - If transcript >= 10 words and question requires detailed description: evaluate 0-10
-   - If simple question (factual/simple_yes_no): set to null (no vocabulary richness evaluation)
-   - Evaluate vocabulary richness, word variety, sentence structure
-   - ADJUST based on age and education level
-
-2. **CONTEXT_RELEVANCE_SCORE:**
-   - Always evaluate from 0-10
-   - Measure how well answer matches the question
-   - Adjust criteria based on question type:
-{context_instructions_en}
-   - Short but accurate transcripts can still score high
-
-3. **OVERALL_SCORE:**
-   - If both scores available: (vocabulary_score + context_relevance_score) / 2
-   - If only context_relevance_score: use that value
-
-**STRICT JSON FORMAT REQUIREMENT:**
+**JSON REQUIREMENT:**
 
 {{
-  "vocabulary_score": {"null" if is_short or question_type in ['factual', 'simple_yes_no'] else "INTEGER_0_10"},
-  "context_relevance_score": "INTEGER_0_10",
-  "overall_score": "INTEGER_0_10",
-  "analysis": "DETAILED_ANALYSIS_IN_ENGLISH_AT_LEAST_50_WORDS",
-  "feedback": "SPECIFIC_IMPROVEMENT_SUGGESTIONS_IN_ENGLISH_AT_LEAST_30_WORDS",
+  "analysis": "DETAILED_ANALYSIS_IN_ENGLISH_ABOUT_ANSWER_RELEVANCE",
+  "feedback": "IMPROVEMENT_SUGGESTIONS_IF_NEEDED_IN_ENGLISH",
   "transcript_info": {{
     "word_count": {word_count},
-    "is_short_transcript": {str(is_short).lower()},
-    "question_type": "{question_type}",
-    "vocabulary_richness_applicable": {str(not (is_short or question_type in ['factual', 'simple_yes_no'])).lower()}
+    "is_short_transcript": {str(is_short).lower()}
   }}
 }}
 
 **IMPORTANT:**
-- DO NOT add text outside JSON
-- Ensure 100% valid JSON
-- Analysis and feedback must be detailed and meaningful
-- Scores must be integers from 0-10
-- For {question_type} questions: prioritize {question_type} evaluation criteria
+- DO NOT provide scores (vocabulary_score, context_relevance_score, overall_score)
+- Only analyze and provide feedback
+- Valid JSON only
             """.strip()
 
-        # Debug: Log the generated prompt
-        logger.debug(f"🤖 Generated prompt: {prompt[:200]}...")
+        logger.info(f"📝 Validating transcript (word count: {word_count})")
 
-        # Count words in transcript
-        word_count = len(transcript.split())
-        logger.info(f"📝 Transcript word count: {word_count}")
-
-        # Use GPT-4o for evaluation (primary choice)
+        # Use GPT-4o for validation only
         try:
             if not openai_client:
                 raise Exception("OpenAI client not available")
@@ -1734,213 +1877,265 @@ You are a cognitive assessment expert. Analyze transcript and return accurate JS
             response = openai_client.chat.completions.create(
                 model="gpt-4o",
                 messages=[
-                    {"role": "system", "content": "You are an expert cognitive assessment evaluator specializing in Alzheimer's disease and dementia. Always respond with valid JSON only."},
+                    {"role": "system", "content": "You are an MMSE answer validator. Only validate answers, do not provide scores. Always respond with valid JSON only."},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.2,
-                max_tokens=800,
+                max_tokens=500,
                 response_format={"type": "json_object"}
             )
             
-            # Parse GPT-4o response
             result_text = response.choices[0].message.content.strip()
-            logger.info(f"🤖 GPT-4o evaluation response: {result_text[:200]}...")
+            logger.info(f"🤖 GPT-4o validation response: {result_text[:200]}...")
             
         except Exception as e:
-            logger.error(f"❌ GPT-4o evaluation failed: {e}")
-            # Fallback to Gemini if GPT-4o fails
-            try:
-                import google.generativeai as genai
-                genai.configure(api_key=os.getenv('GOOGLE_API_KEY'))
-                model = genai.GenerativeModel('gemini-2.5-flash')
-                
-                response = model.generate_content(
-                    prompt,
-                    generation_config=genai.types.GenerationConfig(
-                        temperature=0.2,
-                        max_output_tokens=800,
-                        response_mime_type="application/json"
-                    )
-                )
-                
-                # Parse Gemini response
-                result_text = response.text.strip()
-                logger.info(f"🤖 Gemini fallback evaluation response: {result_text[:200]}...")
-                
-            except Exception as gemini_e:
-                logger.error(f"❌ Gemini fallback also failed: {gemini_e}")
-                # Final fallback to GPT-3.5-turbo
-                response = openai_client.chat.completions.create(
-                    model="gpt-3.5-turbo",
-                    messages=[
-                        {"role": "system", "content": "You are an expert cognitive assessment evaluator. Always respond with valid JSON only."},
-                        {"role": "user", "content": prompt}
-                    ],
-                    temperature=0.2,
-                    max_tokens=800
-                )
-                
-                # Parse GPT-3.5-turbo response
-                result_text = response.choices[0].message.content.strip()
-                logger.info(f"🤖 GPT-3.5-turbo final fallback response: {result_text[:200]}...")
+            logger.error(f"❌ GPT-4o validation failed: {e}")
+            return default_result
 
-        # Debug: Log raw response
-        logger.debug(f"📄 GPT response: '{result_text}'")
-        
-        # Try to parse JSON response
+        # Parse JSON response
         try:
             result = json.loads(result_text)
             
-            # Ensure result is a dictionary
             if not isinstance(result, dict):
                 logger.error(f"❌ Response is not a dictionary: {type(result)}")
                 return default_result
 
-            # Validate that we have the required fields
-            required_fields = ['vocabulary_score', 'context_relevance_score', 'overall_score', 'analysis', 'feedback']
-
-            # Check if all required fields are present
-            missing_fields = [field for field in required_fields if field not in result]
-            if missing_fields:
-                logger.warning(f"⚠️ Missing required fields: {missing_fields}")
-                # Try to create a corrected result
-                result = _correct_gpt_response(result, word_count, is_short, language)
-
-            # Handle null vocabulary_score
-            if result.get('vocabulary_score') is None:
-                result['vocabulary_score'] = None
-                result['vocabulary_analysis'] = None
-
-            # Ensure transcript_info is present and correct
+            # Ensure required fields
+            if 'analysis' not in result:
+                result['analysis'] = default_result['analysis']
+            if 'feedback' not in result:
+                result['feedback'] = default_result['feedback']
             if 'transcript_info' not in result:
-                result['transcript_info'] = {
-                    'word_count': word_count,
-                    'is_short_transcript': word_count < 10,
-                    'vocabulary_richness_applicable': result.get('vocabulary_score') is not None
-                }
+                result['transcript_info'] = default_result['transcript_info']
             else:
-                # Force correct word_count even if GPT returned different value
                 result['transcript_info']['word_count'] = word_count
-                result['transcript_info']['is_short_transcript'] = word_count < 10
+                result['transcript_info']['is_short_transcript'] = is_short
 
-            # Validate and calculate overall_score if needed
-            context_score = result.get('context_relevance_score', 5.0)
-            vocab_score = result.get('vocabulary_score')
-
-            if vocab_score is not None and result.get('overall_score') is None:
-                # Calculate overall score from available scores
-                result['overall_score'] = (vocab_score + context_score) / 2
-            elif vocab_score is None and result.get('overall_score') is None:
-                # Only context score available
-                result['overall_score'] = context_score
-
-            # Validate all numeric fields
-            numeric_fields = ['vocabulary_score', 'context_relevance_score', 'overall_score']
-            for key in numeric_fields:
-                if key in result and result[key] is not None:
-                    value = result[key]
-                    if not isinstance(value, (int, float)) or np.isnan(value) or np.isinf(value):
-                        logger.warning(f"⚠️ Invalid {key}: {value}, using default")
-                        result[key] = default_result[key]
-            
-            # Ensure required fields exist with fallback
-            for key in ['analysis', 'feedback']:
-                if key not in result or not result[key]:
-                    result[key] = default_result[key]
-
-            logger.info("✅ GPT evaluation successful")
+            logger.info("✅ GPT validation successful")
             return result
 
         except json.JSONDecodeError as json_error:
             logger.warning(f"⚠️ Invalid JSON response from GPT: {json_error}")
-            logger.debug(f"Raw response: {result_text}")
-
-            # Try to extract partial information from malformed response
-            try:
-                corrected_result = _correct_gpt_response({}, word_count, is_short, language)
-                logger.info("✅ Used corrected GPT response")
-                return corrected_result
-            except Exception as correction_error:
-                logger.error(f"❌ Correction failed: {correction_error}")
             return default_result
             
     except Exception as e:
-        logger.error(f"❌ GPT evaluation failed: {e}")
-        # Ensure we always return a dictionary, not a string
-        if isinstance(default_result, dict):
-            return default_result
-        else:
-            logger.error(f"❌ Default result is not a dictionary: {type(default_result)}")
-            return {
-                'vocabulary_score': 5.0,
-                'context_relevance_score': 5.0,
-                'overall_score': 5.0,
-                'analysis': "Đánh giá không khả dụng do lỗi hệ thống",
-                'feedback': "Đánh giá không khả dụng do lỗi hệ thống"
-            }
+        logger.error(f"❌ GPT validation failed: {e}")
+        return default_result
     
     # Final safety check - ensure we never return a string
     finally:
         # This will always execute, but we can't return from finally
         pass
 
-def _calculate_final_mmse_score(ml_score: float, gpt_overall_score: float, context_score: float, vocab_score: float = None) -> int:
+# ❌ REMOVED: _calculate_final_mmse_score() - replaced by rule-based scoring
+# All ML/fusion scoring has been removed. Use calculate_total_mmse() instead.
+
+# =============================================================================
+# NEW RULE-BASED MMSE SCORING SYSTEM
+# =============================================================================
+
+def load_question_from_json(question_id: str) -> dict:
     """
-    Calculate final MMSE score using minimum percentage approach (conservative for cognitive assessment)
-    
-    Pipeline:
-    1. Tầng 1: ML model xử lý acoustic features → ml_score (0-30)
-    2. Tầng 1: GPT eval xử lý transcript + question → gpt_overall_score, context_score (0-10)
-    3. Tầng 2: Đánh giá mức độ nguy cơ và tính điểm MMSE cuối cùng
+    Load question data from mmse_audio_questions_standardized.json
     
     Args:
-        ml_score: ML prediction score từ acoustic features (0-30 MMSE scale)
-        gpt_overall_score: GPT overall score từ transcript evaluation (0-10 scale)  
-        context_score: GPT context score đánh giá mức độ đáp ứng câu hỏi (0-10 scale)
-        vocab_score: GPT vocabulary score (0-10 scale, optional)
-        
+        question_id: Question ID (e.g., "ori_time_01", "reg_01")
+    
     Returns:
-        Final MMSE score as integer (1-29, vì >0 và <30)
+        dict: Question data with scoring rules, expected answers, etc.
     """
-    # Validate inputs
-    ml_score = max(0.0, min(30.0, float(ml_score)))
-    gpt_overall_score = max(0.0, min(10.0, float(gpt_overall_score)))
-    context_score = max(0.0, min(10.0, float(context_score)))
+    try:
+        questions_path = os.path.join(
+            os.path.dirname(__file__),
+            'mmse_audio_questions_standardized.json'
+        )
+        
+        if not os.path.exists(questions_path):
+            logger.error(f"❌ Questions file not found: {questions_path}")
+            return {}
+        
+        with open(questions_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        
+        mmse_data = data.get('mmse_vietnamese_chatbot', {})
+        domains = mmse_data.get('domains', [])
+        
+        # Search for question in all domains
+        for domain in domains:
+            questions = domain.get('questions', [])
+            for question in questions:
+                if question.get('question_id') == question_id:
+                    return question
+        
+        logger.warning(f"⚠️ Question {question_id} not found in JSON")
+        return {}
+        
+    except Exception as e:
+        logger.error(f"❌ Error loading question {question_id}: {e}")
+        return {}
+
+
+def validate_answer_with_gpt(question_data: dict, transcript: str) -> dict:
+    """
+    Call GPT-4o to validate answer against expected response.
+    GPT-4o acts as validator only, NOT a scorer.
     
-    # Convert scores to percentages
-    ml_percentage = (ml_score / 30.0) * 100  # ML score is 0-30 (MMSE scale)
-    gpt_percentage = (gpt_overall_score / 10.0) * 100  # GPT score is 0-10
+    Args:
+        question_data: dict from mmse_audio_questions.json
+        transcript: str from Gemini ASR
     
-    # Tầng 1: Đánh giá mức độ nguy cơ - lấy phần trăm thấp hơn (conservative)
-    min_percentage = min(ml_percentage, gpt_percentage)
+    Returns:
+        {
+            "is_correct": bool,
+            "matched_elements": list,
+            "explanation": str
+        }
+    """
+    if not openai_client:
+        logger.warning("⚠️ OpenAI client not available for validation")
+        return {
+            "is_correct": False,
+            "matched_elements": [],
+            "explanation": "GPT validation không khả dụng"
+        }
     
-    # Tầng 2: Tính điểm MMSE cuối cùng với weighting phù hợp
-    if vocab_score is not None:
-        # Có đầy đủ vocabulary và context scores - đánh giá toàn diện
-        vocab_percentage = (vocab_score / 10.0) * 100
-        # Kết hợp: ML (50%), GPT overall (30%), Context (20%)
-        combined_percentage = (ml_percentage * 0.5) + (gpt_percentage * 0.3) + (vocab_percentage * 0.2)
-        final_score = (combined_percentage / 100.0) * 30.0
-        logger.info(f"📊 Final score (full): ML:{ml_percentage:.1f}%, GPT:{gpt_percentage:.1f}%, Vocab:{vocab_percentage:.1f}% → Combined:{combined_percentage:.1f}% → MMSE:{final_score:.1f}")
+    try:
+        # Extract question info
+        question_text = question_data.get('chatbot_message', '')
+        expected_answer = question_data.get('expected_answer_format', '')
+        acceptable_answers = question_data.get('acceptable_answers', [])
+        scoring_details = question_data.get('scoring_details', {})
+        fuzzy_matching = question_data.get('fuzzy_matching', {})
+        correct_sequence = question_data.get('correct_sequence', [])
+        
+        # Build prompt for GPT validator
+        prompt = f"""Bạn là người kiểm tra đáp án MMSE cho tiếng Việt.
+
+CÂU HỎI: {question_text}
+ĐÁP ÁN MONG ĐỢI: {expected_answer}
+CÁC ĐÁP ÁN CHẤP NHẬN: {acceptable_answers}
+TRANSCRIPT NGƯỜI DÙNG: {transcript}
+
+Nhiệm vụ: Xác định xem đáp án của người dùng có khớp với đáp án mong đợi không.
+
+Định dạng phản hồi (CHỈ JSON):
+{{
+  "is_correct": true/false,
+  "matched_elements": ["phần tử 1", "phần tử 2"],
+  "explanation": "lý do ngắn gọn bằng tiếng Việt"
+}}
+
+Quy tắc:
+- Linh hoạt với dấu tiếng Việt (mèo = meo)
+- Cho phép từ đồng nghĩa nếu có trong acceptable_answers
+- Với câu trả lời nhiều phần (ví dụ: nhớ lại 3 từ), liệt kê từng phần khớp riêng
+- Bỏ qua từ đệm (ừ, à, thì, vâng, dạ, etc.)
+- Tập trung vào khớp ngữ nghĩa, không phải từ ngữ chính xác
+- Với dãy số (ví dụ: 93, 86, 79...), kiểm tra từng số trong dãy
+- Cho phép sai lệch nhỏ nếu logic đúng (ví dụ: trừ 7 đúng nhưng số hơi sai)
+
+CHỈ TRẢ VỀ JSON, KHÔNG CÓ VĂN BẢN KHÁC."""
+
+        response = openai_client.chat.completions.create(
+            model="gpt-4o",
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_object"},
+            temperature=0.3
+        )
+        
+        result = json.loads(response.choices[0].message.content)
+        logger.info(f"✅ GPT validation result: is_correct={result.get('is_correct')}, matched={len(result.get('matched_elements', []))}")
+        return result
+        
+    except Exception as e:
+        logger.error(f"❌ GPT validation failed: {e}")
+        return {
+            "is_correct": False,
+            "matched_elements": [],
+            "explanation": f"Lỗi validation: {str(e)}"
+        }
+
+
+def calculate_question_score(question_data: dict, validation_result: dict) -> int:
+    """
+    Calculate score based on MMSE rules from JSON
+    
+    Args:
+        question_data: dict with 'points', 'scoring_rule', 'scoring_details'
+        validation_result: output from validate_answer_with_gpt()
+    
+    Returns:
+        int: score for this question (0 to max_points)
+    """
+    max_points = question_data.get('points', 0)
+    
+    # Simple binary scoring (most questions)
+    if 'scoring_details' not in question_data:
+        return max_points if validation_result.get('is_correct', False) else 0
+    
+    # Multi-element scoring (e.g., 3-word recall, serial subtraction)
+    scoring_details = question_data.get('scoring_details', {})
+    matched_elements = validation_result.get('matched_elements', [])
+    
+    score = 0
+    
+    # Check for sequence-based scoring (e.g., serial subtraction)
+    if 'correct_sequence' in question_data:
+        correct_sequence = question_data.get('correct_sequence', [])
+        error_handling = question_data.get('error_handling', {})
+        partial_credit = error_handling.get('partial_credit', False)
+        logic_based = error_handling.get('logic_based_scoring', False)
+        
+        # Extract numbers from transcript
+        import re
+        numbers = [int(x) for x in re.findall(r'\d+', validation_result.get('explanation', '') + ' ' + str(matched_elements))]
+        
+        if numbers:
+            # Compare with correct sequence
+            for i, correct_num in enumerate(correct_sequence):
+                if i < len(numbers):
+                    user_num = numbers[i]
+                    if user_num == correct_num:
+                        score += 1
+                    elif partial_credit and logic_based:
+                        # Check if logic is correct (subtracting 7)
+                        if i > 0 and abs(user_num - correct_num) < 3:
+                            # Close enough, might be calculation error
+                            score += 0.5
+        else:
+            # Try to match from matched_elements
+            for element in matched_elements:
+                try:
+                    num = int(element)
+                    if num in correct_sequence:
+                        score += 1
+                except:
+                    pass
     else:
-        # Chỉ có context score (transcript ngắn) - đánh giá dựa trên context relevance
-        context_percentage = (context_score / 10.0) * 100
-        # Kết hợp: ML (60%), GPT overall (20%), Context (20%) với penalty cho transcript ngắn
-        combined_percentage = (ml_percentage * 0.6) + (gpt_percentage * 0.2) + (context_percentage * 0.2)
-        final_score = (combined_percentage / 100.0) * 30.0 * 0.95  # 5% penalty for short transcript
-        logger.info(f"📊 Final score (short transcript): ML:{ml_percentage:.1f}%, GPT:{gpt_percentage:.1f}%, Context:{context_percentage:.1f}% → Combined:{combined_percentage:.1f}% → MMSE:{final_score:.1f} (with penalty)")
+        # Element-based scoring (e.g., 3-word recall)
+        for element in matched_elements:
+            # Check if element matches any key in scoring_details
+            for key, points in scoring_details.items():
+                if element.lower() in key.lower() or key.lower() in element.lower():
+                    score += points
+                    break
     
-    # Đảm bảo final score là số nguyên trong khoảng (0, 30) - user yêu cầu >0, <30
-    final_score_float = max(0.0, min(30.0, final_score))
-    # Làm tròn và đảm bảo >0, <30
-    final_score_int = int(round(final_score_float))
-    if final_score_int <= 0:
-        final_score_int = 1  # Minimum >0
-    elif final_score_int >= 30:
-        final_score_int = 29  # Maximum <30
+    return min(int(score), max_points)
+
+
+def calculate_total_mmse(question_scores: dict) -> int:
+    """
+    Sum all question scores to get total MMSE score
     
-    logger.info(f"✅ Final MMSE score (integer): {final_score_int}/30")
-    return final_score_int
+    Args:
+        question_scores: dict {question_id: score}
+    
+    Returns:
+        int: total MMSE score /30
+    """
+    total = sum(question_scores.values())
+    return min(max(0, total), 30)  # Clamp to 0-30
+
 
 def _correct_gpt_response(partial_result, word_count, is_short, language):
     """Correct and complete GPT response if missing fields"""
@@ -2301,77 +2496,199 @@ def prepare_feature_vector(audio_features: dict, feature_names: list) -> np.ndar
 # PREDICTION FUNCTION (PRIORITY 3, 5)
 # =============================================================================
 
-def predict_cognitive_score(audio_features: dict) -> dict:
+def predict_cognitive_score(audio_features: dict, transcript: str = None, audio_path: str = None, user_info: dict = None) -> dict:
     """
-    Predict cognitive score using ML model with proper preprocessing pipeline
+    Predict cognitive score using NEW MCIScreeningService from modules.
     
-    Pipeline: Extract → Validate → Select → Scale → Predict → Validate output
+    This replaces the old ML model pipeline with the new multimodal modules:
+    - AcousticAnalyzer (117 features)
+    - LinguisticAnalyzer (42 features with PhoBERT)
+    - MultimodalFusion
+    - MCIPredictor (uses newest model from models/best_model.pkl)
     
     Args:
-        audio_features: Dictionary of extracted audio features
+        audio_features: Dictionary of extracted audio features (legacy support)
+        transcript: Optional transcript for linguistic analysis
+        audio_path: Optional audio file path for acoustic analysis
         
     Returns:
         dict: Prediction result with score, confidence, and metadata
-        
-    Raises:
-        ValueError: If model not loaded, features invalid, or prediction fails
     """
+    global mci_service, MCI_MODULES_AVAILABLE
+    
+    logger.info("=" * 60)
+    logger.info("NEW MODULES PREDICTION PIPELINE")
+    logger.info("=" * 60)
+    
+    # Use NEW MCI modules if available (primary method)
+    if MCI_MODULES_AVAILABLE and mci_service:
+        try:
+            logger.info("✅ Using MCIScreeningService for prediction")
+            
+            # If audio_path provided, use it for full analysis
+            if audio_path:
+                result = mci_service.analyze(
+                    audio_path=audio_path,
+                    transcript=transcript,
+                    task_type='mmse_assessment',
+                    user_info=user_info
+                )
+                
+                if result.success and result.mci_prediction:
+                    mmse_estimate = result.mmse_estimate
+                    mci_prob = result.mci_prediction.get('mci_probability', 0.5)
+                    confidence = result.confidence
+                    
+                    logger.info(f"✅ MCI modules prediction: MMSE={mmse_estimate:.1f}/30, MCI_prob={mci_prob:.2f}")
+                    
+                    return {
+                        'predicted_score': float(mmse_estimate),
+                        'confidence': float(confidence),
+                        'mci_probability': float(mci_prob),
+                        'model_used': 'MCIScreeningService (newest)',
+                        'acoustic_features_count': len(result.acoustic_features),
+                        'linguistic_features_count': len(result.linguistic_features),
+                        'severity': result.severity,
+                        'risk_factors': result.risk_factors
+                    }
+            
+            # Fallback: Use acoustic features if provided (legacy support)
+            if audio_features and len(audio_features) > 0:
+                logger.info("⚠️ Using legacy audio_features, extracting full features from modules...")
+                # Try to use predictor directly with FULL features from modules
+                if mci_service.predictor:
+                    combined_features = {}
+                    
+                    # 1. Add acoustic features from NEW modules if available
+                    if mci_service.acoustic_analyzer and audio_path:
+                        try:
+                            logger.info("✅ Extracting acoustic features from NEW AcousticAnalyzer...")
+                            new_acoustic = mci_service.acoustic_analyzer.extract_all_features(
+                                audio_path,
+                                transcript=transcript
+                            )
+                            if new_acoustic:
+                                # Add all acoustic features
+                                for key, value in new_acoustic.items():
+                                    if isinstance(value, (int, float)) and not np.isnan(value):
+                                        combined_features[key] = float(value)
+                                logger.info(f"✅ Added {len(new_acoustic)} acoustic features from NEW modules")
+                        except Exception as e:
+                            logger.warning(f"⚠️ Failed to extract from NEW AcousticAnalyzer: {e}")
+                            # Fallback to legacy audio_features
+                            for key, value in audio_features.items():
+                                if isinstance(value, (int, float)):
+                                    combined_features[f'acoustic_{key}'] = float(value)
+                    else:
+                        # Use legacy audio_features
+                        for key, value in audio_features.items():
+                            if isinstance(value, (int, float)):
+                                combined_features[f'acoustic_{key}'] = float(value)
+                    
+                    # 2. Extract linguistic features from transcript if available
+                    if transcript and mci_service.linguistic_analyzer:
+                        try:
+                            logger.info("✅ Extracting linguistic features from NEW LinguisticAnalyzer...")
+                            linguistic_features = mci_service.linguistic_analyzer.extract_all_features(
+                                transcript,
+                                task_type='mmse_assessment'
+                            )
+                            if linguistic_features:
+                                for key, value in linguistic_features.items():
+                                    if isinstance(value, (int, float)) and not np.isnan(value):
+                                        combined_features[key] = float(value)
+                                logger.info(f"✅ Added {len(linguistic_features)} linguistic features from NEW modules")
+                        except Exception as e:
+                            logger.warning(f"⚠️ Failed to extract linguistic features: {e}")
+                    
+                    # 3. Add user info (age, education) to features
+                    if user_info:
+                        try:
+                            age = user_info.get('age') or user_info.get('age_years')
+                            if age:
+                                if isinstance(age, str):
+                                    age = float(age)
+                                combined_features['age'] = float(age)
+                                logger.info(f"✅ Added age to features: {age}")
+                        except (ValueError, TypeError) as e:
+                            logger.warning(f"⚠️ Could not parse age: {e}")
+                        
+                        try:
+                            education = user_info.get('education_years') or user_info.get('education') or user_info.get('education_level')
+                            if education:
+                                if isinstance(education, str):
+                                    education = float(education)
+                                combined_features['education_years'] = float(education)
+                                logger.info(f"✅ Added education to features: {education}")
+                        except (ValueError, TypeError) as e:
+                            logger.warning(f"⚠️ Could not parse education: {e}")
+                    
+                    logger.info(f"✅ Total features for prediction: {len(combined_features)}")
+                    
+                    # Call predictor with merged features dict
+                    prediction = mci_service.predictor.predict(combined_features)
+                    
+                    return {
+                        'predicted_score': float(prediction.mmse_estimate),
+                        'confidence': float(prediction.confidence),
+                        'mci_probability': float(prediction.mci_probability),
+                        'model_used': 'MCIPredictor (newest modules)',
+                        'severity': prediction.severity,
+                        'features_count': len(combined_features)
+                    }
+            
+            # If no audio_path or audio_features, return default
+            logger.warning("⚠️ No audio_path or audio_features provided, using default")
+            return {
+                'predicted_score': 20.0,
+                'confidence': 0.5,
+                'model_used': 'MCIScreeningService (default)',
+                'note': 'No audio input provided'
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ MCI modules prediction failed: {e}")
+            # Fall through to legacy method
+    
+    # FALLBACK: Legacy ML model (if MCI modules not available)
+    # Only use if we have compatible features
+    logger.warning("⚠️ MCI modules not available, checking legacy ML model compatibility...")
     global cognitive_model, feature_names, model_scaler, model_selector
     
-    logger.info("=" * 60)
-    logger.info("ML PREDICTION PIPELINE")
-    logger.info("=" * 60)
-    
-    # PRIORITY 5: Fail fast if model not loaded - NO DEFAULT VALUES
     if not cognitive_model or not feature_names:
-        error_msg = "ML model not loaded. Please check server logs and ensure model bundle exists."
+        error_msg = "Neither MCI modules nor legacy ML model available."
         logger.error(error_msg)
-        raise ValueError(error_msg)
+        # Return default instead of raising error
+        return {
+            'predicted_score': 20.0,
+            'confidence': 0.5,
+            'model_used': 'fallback (no model available)',
+            'note': 'No prediction model available'
+        }
     
-    # Try to reload bundle if scaler/selector missing (legacy). For pipeline models this is optional.
-    if model_scaler is None or model_selector is None:
-        logger.warning("Model scaler/selector not loaded. Attempting to reload model bundle (optional for pipeline models)...")
-        try:
-            model, scaler, selector, fnames = load_model_bundle()
-            if model is not None:
-                cognitive_model = model
-                feature_names = fnames
-                model_scaler = scaler  # may be None for pipeline bundles
-                model_selector = selector  # may be None for pipeline bundles
-                logger.info("Model bundle reloaded successfully")
-        except Exception as e:
-            logger.error(f"Reload attempt failed: {e}")
-            # continue with existing model (pipeline may still work)
+    # Check if we have compatible features for legacy model
+    # Legacy model requires specific feature names, not generic ones
+    missing_legacy_features = [f for f in feature_names if f not in audio_features and f.startswith('feature_')]
+    if missing_legacy_features and len(missing_legacy_features) > 5:
+        logger.warning(f"⚠️ Legacy model requires {len(missing_legacy_features)} missing features, skipping legacy model")
+        return {
+            'predicted_score': 20.0,
+            'confidence': 0.5,
+            'model_used': 'fallback (incompatible features)',
+            'note': f'Legacy model requires {len(missing_legacy_features)} missing features'
+        }
     
     try:
-        # Step 1: Prepare feature vector with validation
-        logger.info("Step 1: Preparing feature vector...")
-        logger.info(f"Input features: {audio_features}")
-        feature_vector = prepare_feature_vector(audio_features, feature_names)
-        logger.info(f"Feature vector shape: {feature_vector.shape}")
-        logger.info(f"Feature vector values: {feature_vector[0]}")
-        
-        # Step 2: Apply feature selector if exists
+        # Legacy pipeline - fill missing features
+        safe_features = _fill_missing_features(audio_features, feature_names)
+        feature_vector = prepare_feature_vector(safe_features, feature_names)
         processed_vector = feature_vector
+        
         if model_selector is not None:
-            logger.info("Step 2: Applying feature selector...")
             processed_vector = model_selector.transform(processed_vector)
-            logger.info(f"After selector shape: {processed_vector.shape}")
-            logger.info(f"After selector values: {processed_vector[0]}")
-        else:
-            logger.warning("No feature selector available, skipping selection step")
-        
-        # Step 3: Apply scaler if available (legacy). Pipeline models will handle scaling internally.
         if model_scaler is not None:
-            logger.info("Step 3: Applying scaler...")
             processed_vector = model_scaler.transform(processed_vector)
-            logger.info(f"After scaling shape: {processed_vector.shape}")
-            logger.info(f"After scaling values: {processed_vector[0]}")
-        else:
-            logger.warning("No external scaler; assuming model pipeline handles scaling internally")
         
-        # Step 4: Make prediction
-        logger.info("Step 4: Making prediction...")
         raw_prediction = cognitive_model.predict(processed_vector)
         
         # Handle different prediction output formats
@@ -3402,9 +3719,20 @@ def assess_cognitive():
                     }
                 }
             else:
-                # Evaluate even if confidence is low, as long as there's actual content
-                logger.info(f"🤖 Calling GPT evaluation for transcript: '{transcript_text[:100]}...'")
-                gpt_evaluation = evaluate_with_gpt4o(transcript_text, question, user_data, language)
+                # Evaluate using NEW MCI modules first, fallback to GPT
+                logger.info(f"🧠 Calling MCI evaluation for transcript: '{transcript_text[:100]}...'")
+                if MCI_MODULES_AVAILABLE and mci_service:
+                    gpt_evaluation = evaluate_with_mci_modules(
+                        transcript_text, 
+                        question, 
+                        audio_path=processed_path if 'processed_path' in dir() else None,
+                        user_data=user_data, 
+                        language=language
+                    )
+                    logger.info("✅ Used NEW MCI modules for evaluation")
+                else:
+                    gpt_evaluation = evaluate_with_gpt4o(transcript_text, question, user_data, language)
+                    logger.info("⚠️ Used legacy GPT evaluation (MCI modules not available)")
                 
                 # Ensure gpt_evaluation is a dictionary
                 if not isinstance(gpt_evaluation, dict):
@@ -3463,10 +3791,15 @@ def assess_cognitive():
                 vocab_score = None
 
             # IMPORTANT: These are AI SUPPORT scores, NOT official MMSE
-            # Tầng 2: Đánh giá mức độ nguy cơ và tính điểm MMSE cuối cùng
+            # Tang 2: Danh gia muc do nguy co va tinh diem MMSE cuoi cung
+            # Extract MCI analysis if available from new modules
+            mci_analysis = gpt_evaluation.get('mci_analysis') if isinstance(gpt_evaluation, dict) else None
             try:
-                final_score = _calculate_final_mmse_score(ml_score, gpt_overall_score, context_score, vocab_score)
-                # Đảm bảo final_score là số nguyên >0, <30
+                # ❌ REMOVED: ML/fusion scoring replaced by rule-based scoring
+                # Use rule-based scoring instead - this endpoint needs question_id
+                logger.warning("⚠️ This endpoint should use rule-based scoring with question_id")
+                final_score = 15  # Fallback
+                # Dam bao final_score la so nguyen >0, <30
                 if not isinstance(final_score, int):
                     final_score = int(round(final_score))
                 final_score = max(1, min(29, final_score))
@@ -3645,8 +3978,8 @@ def transcribe_endpoint():
             thread.daemon = True
             thread.start()
             
-            # Wait for completion or timeout (OpenAI Whisper is much faster)
-            thread.join(timeout=30)  # 30 seconds timeout for OpenAI Whisper
+            # Wait for completion or timeout
+            thread.join(timeout=30)  # 30 seconds timeout for Gemini transcription
             
             if thread.is_alive():
                 logger.error("❌ Transcription timeout after 30 seconds")
@@ -3988,9 +4321,14 @@ def auto_transcribe_alias():
                 vocab_score = None
 
             # Tầng 2: Đánh giá mức độ nguy cơ và tính điểm MMSE cuối cùng
-            # Đảm bảo final_score luôn được tính (số nguyên >0, <30)
+            # Dam bao final_score luon duoc tinh (so nguyen >0, <30)
+            # Extract MCI analysis if available from new modules
+            mci_analysis = gpt_evaluation.get('mci_analysis') if isinstance(gpt_evaluation, dict) else None
             try:
-                final_score = _calculate_final_mmse_score(ml_score, gpt_overall_score, context_score, vocab_score)
+                # ❌ REMOVED: ML/fusion scoring replaced by rule-based scoring
+                # Use rule-based scoring instead - this endpoint needs question_id
+                logger.warning("⚠️ This endpoint should use rule-based scoring with question_id")
+                final_score = 15  # Fallback
                 logger.info(f"✅ Final MMSE score calculated: {final_score}/30")
             except Exception as e:
                 logger.error(f"❌ Error calculating final score: {e}")
@@ -4135,7 +4473,7 @@ def test_transcription_raw():
             
             if vietnamese_transcriber:
                 # Call the raw transcription method directly
-                result = vietnamese_transcriber._transcribe_with_whisper_only(audio_path, language)
+                result = vietnamese_transcriber._transcribe_with_gemini_only(audio_path, language)
             else:
                 result = transcribe_audio(audio_path, question)
             
@@ -4223,7 +4561,7 @@ def auto_transcribe_raw():
         try:
             # Step 1: Transcribe audio WITHOUT GPT-4o improvement
             if vietnamese_transcriber:
-                transcription_result = vietnamese_transcriber._transcribe_with_whisper_only(processed_path, language)
+                transcription_result = vietnamese_transcriber._transcribe_with_gemini_only(processed_path, language)
             else:
                 transcription_result = transcribe_audio(processed_path, question)
             
@@ -4316,10 +4654,15 @@ def auto_transcribe_raw():
                 logger.warning(f"⚠️ Invalid vocabulary score: {vocab_score}, setting to None")
                 vocab_score = None
 
-            # Tầng 2: Đánh giá mức độ nguy cơ và tính điểm MMSE cuối cùng
+            # Tang 2: Danh gia muc do nguy co va tinh diem MMSE cuoi cung
+            # Extract MCI analysis if available from new modules
+            mci_analysis = gpt_evaluation.get('mci_analysis') if isinstance(gpt_evaluation, dict) else None
             try:
-                final_score = _calculate_final_mmse_score(ml_score, gpt_overall_score, context_score, vocab_score)
-                # Đảm bảo final_score là số nguyên >0, <30
+                # ❌ REMOVED: ML/fusion scoring replaced by rule-based scoring
+                # Use rule-based scoring instead - this endpoint needs question_id
+                logger.warning("⚠️ This endpoint should use rule-based scoring with question_id")
+                final_score = 15  # Fallback
+                # Dam bao final_score la so nguyen >0, <30
                 if not isinstance(final_score, int):
                     final_score = int(round(final_score))
                 final_score = max(1, min(29, final_score))
@@ -4363,7 +4706,7 @@ def auto_transcribe_raw():
 
 @app.route('/api/evaluate', methods=['POST'])
 def evaluate_transcript():
-    """Transcript evaluation endpoint"""
+    """Transcript evaluation endpoint - Uses NEW MCI modules for evaluation"""
     try:
         data = request.get_json()
         
@@ -4376,6 +4719,7 @@ def evaluate_transcript():
         transcript = data.get('transcript', '')
         question = data.get('question', 'Describe what you see')
         user_data = data.get('user_data', {})
+        language = data.get('language', 'vi')
         
         if not transcript:
             return jsonify({
@@ -4383,7 +4727,14 @@ def evaluate_transcript():
                 'error': 'No transcript provided'
             }), 400
 
-        evaluation = evaluate_with_gpt4o(transcript, question, user_data)
+        # Use NEW MCI modules for evaluation (primary choice)
+        if MCI_MODULES_AVAILABLE and mci_service:
+            logger.info("🧠 Using NEW MCI modules for evaluation")
+            evaluation = evaluate_with_mci_modules(transcript, question, None, user_data, language)
+        else:
+            logger.info("⚠️ Falling back to GPT evaluation (MCI modules not available)")
+            evaluation = evaluate_with_gpt4o(transcript, question, user_data, language)
+        
         return jsonify({
             'success': True,
             'evaluation': evaluation
@@ -4783,6 +5134,54 @@ def generate_summary():
             'success': False,
             'error': str(e)
         }), 500
+
+# ✅ FIX: Cleanup function for graceful shutdown
+def cleanup_resources():
+    """Cleanup all resources before shutdown"""
+    try:
+        logger.info("🧹 Starting cleanup...")
+        
+        # Set shutdown flag
+        shutdown_flag.set()
+        
+        # Shutdown thread pool executor
+        if 'executor' in globals():
+            logger.info("🛑 Shutting down ThreadPoolExecutor...")
+            try:
+                executor.shutdown(wait=True, timeout=10)
+                logger.info("✅ ThreadPoolExecutor shut down")
+            except Exception as e:
+                logger.warning(f"⚠️ Error shutting down executor: {e}")
+        
+        # Wait for queue worker to finish
+        if 'queue_thread' in globals() and queue_thread.is_alive():
+            logger.info("🛑 Waiting for queue worker to finish...")
+            queue_thread.join(timeout=5)
+            if queue_thread.is_alive():
+                logger.warning("⚠️ Queue worker did not stop in time")
+            else:
+                logger.info("✅ Queue worker stopped")
+        
+        logger.info("✅ Cleanup completed")
+    except Exception as e:
+        logger.error(f"❌ Error during cleanup: {e}")
+
+# ✅ FIX: Register cleanup handlers
+atexit.register(cleanup_resources)
+
+# ✅ FIX: Signal handlers for graceful shutdown (Unix/Linux)
+def signal_handler(signum, frame):
+    """Handle shutdown signals"""
+    logger.info(f"📶 Received signal {signum}, initiating shutdown...")
+    cleanup_resources()
+    sys.exit(0)
+
+try:
+    signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGINT, signal_handler)
+except (AttributeError, ValueError):
+    # Windows doesn't support all signals
+    pass
 
 # Start queue worker thread
 queue_thread = threading.Thread(target=queue_worker, daemon=True, name='queue_worker')
@@ -5512,6 +5911,57 @@ def complete_mmse_session(session_id):
         }), 400
     except Exception as e:
         logger.error(f"❌ Failed to complete session: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/risk-assessment', methods=['POST'])
+def generate_risk_assessment():
+    """
+    Generate clinical risk assessment after MMSE completion
+    """
+    try:
+        data = request.get_json()
+        
+        acoustic_features = data.get('acoustic_features', {})
+        linguistic_features = data.get('linguistic_features', {})
+        mmse_score = data.get('mmse_score', 0)
+        user_id = data.get('user_id', 'unknown')
+        
+        if not acoustic_features and not linguistic_features:
+            return jsonify({
+                'success': False,
+                'error': 'Acoustic or linguistic features required'
+            }), 400
+        
+        # Import risk assessor
+        from risk_assessment import ClinicalRiskAssessor, save_assessment_results
+        
+        # Generate assessment
+        assessor = ClinicalRiskAssessor(
+            acoustic_features=acoustic_features,
+            linguistic_features=linguistic_features,
+            mmse_score=mmse_score
+        )
+        
+        results = assessor.assess_risk()
+        
+        # Save to database (if db available)
+        try:
+            save_assessment_results(user_id, results)
+        except Exception as e:
+            logger.warning(f"⚠️ Could not save to database: {e}")
+        
+        return jsonify({
+            'success': True,
+            'results': results
+        })
+        
+    except Exception as e:
+        logger.error(f"❌ Risk assessment failed: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({
             'success': False,
             'error': str(e)

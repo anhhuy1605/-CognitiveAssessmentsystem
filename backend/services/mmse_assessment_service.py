@@ -18,13 +18,22 @@ import joblib
 RELEASE_V1_PATH = Path(__file__).parent.parent.parent / "release_v1"
 sys.path.insert(0, str(RELEASE_V1_PATH))
 
-# Import our new MMSE components
+# Import NEW MCI Screening Modules (preferred)
+try:
+    from modules.integration_service import MCIScreeningService
+    MCI_MODULES_AVAILABLE = True
+except ImportError as e:
+    logging.warning(f"MCI modules not available: {e}")
+    MCIScreeningService = None
+    MCI_MODULES_AVAILABLE = False
+
+# Import legacy MMSE components (fallback)
 try:
     from scoring_engine import MMSEScorer
     from feature_extraction import FeatureExtractor
     from encryption import AudioEncryption
 except ImportError as e:
-    logging.error(f"Failed to import MMSE components: {e}")
+    logging.warning(f"Legacy MMSE components not available: {e}")
     MMSEScorer = None
     FeatureExtractor = None
     AudioEncryption = None
@@ -44,7 +53,18 @@ class MMSEAssessmentService:
         self.feature_names = []
         self.weights = {}
         
-        # Initialize components
+        # Initialize NEW MCI Screening Service (preferred)
+        self.mci_service = None
+        if MCI_MODULES_AVAILABLE and MCIScreeningService:
+            try:
+                # Auto-detect newest model
+                self.mci_service = MCIScreeningService(model_path=None, use_phobert=True)
+                logger.info("✅ MCIScreeningService initialized (NEW modules)")
+            except Exception as e:
+                logger.warning(f"Failed to initialize MCIScreeningService: {e}")
+                self.mci_service = None
+        
+        # Initialize legacy components (fallback)
         self.scorer = None
         self.feature_extractor = None
         self.encryptor = None
@@ -86,13 +106,42 @@ class MMSEAssessmentService:
             logger.error(f"Failed to initialize MMSE components: {e}")
     
     def _load_model(self):
-        """Load trained MMSE model and metadata."""
+        """Load trained MMSE model and metadata - prioritize newest models."""
         try:
-            # Load model
-            model_path = self.model_dir / "model_MMSE_v1.pkl"
-            if model_path.exists():
+            # Priority order: newest first
+            # 1. Check for newest model in project root models/
+            project_root = Path(__file__).resolve().parent.parent.parent
+            newest_model = project_root / "models" / "best_model.pkl"
+            
+            # 2. Check model_bundle/model_new_clean/
+            clean_model = project_root / "model_bundle" / "model_new_clean" / "model.pkl"
+            
+            # 3. Check model_bundle/model_new/
+            new_model = project_root / "model_bundle" / "model_new" / "model.pkl"
+            
+            # 4. Fallback to old location
+            legacy_model = self.model_dir / "model_MMSE_v1.pkl"
+            
+            model_path = None
+            if newest_model.exists():
+                model_path = newest_model
+                logger.info(f"✅ Loading NEWEST model from: {model_path}")
+            elif clean_model.exists():
+                model_path = clean_model
+                logger.info(f"✅ Loading clean model from: {model_path}")
+            elif new_model.exists():
+                model_path = new_model
+                logger.info(f"✅ Loading new model from: {model_path}")
+            elif legacy_model.exists():
+                model_path = legacy_model
+                logger.warning(f"⚠️ Loading legacy model from: {model_path}")
+            else:
+                logger.error("❌ No model found in any location")
+                return
+            
+            if model_path and model_path.exists():
                 self.model = joblib.load(model_path)
-                logger.info(f"Loaded MMSE model from {model_path}")
+                logger.info(f"✅ Loaded MMSE model from {model_path}")
             
             # Load metadata
             metadata_path = self.model_dir / "model_metadata.json"
@@ -117,14 +166,14 @@ class MMSEAssessmentService:
             logger.error(f"Failed to load MMSE model: {e}")
     
     def transcribe_audio(self, audio_path: str) -> Dict[str, Any]:
-        """Transcribe audio using Whisper."""
+        """Transcribe audio using Gemini (Google AI)."""
         try:
-            import whisper
             import os
+            import google.generativeai as genai
 
             # Log audio file info
             file_size = os.path.getsize(audio_path)
-            logger.info(f"🎵 Transcribing file: {audio_path}")
+            logger.info(f"🎵 Transcribing file with Gemini: {audio_path}")
             logger.info(f"📊 File size: {file_size} bytes")
 
             if file_size < 1024:
@@ -137,18 +186,28 @@ class MMSEAssessmentService:
                     'error': 'Audio file too small'
                 }
 
-            # Load Whisper model
-            model = whisper.load_model("large-v2")
-
-            # Clear any cached results
-            if hasattr(model, 'cache'):
-                model.cache.clear()
+            # Configure Gemini
+            gemini_api_key = os.getenv('GEMINI_API_KEY')
+            if not gemini_api_key:
+                logger.error("❌ Gemini API key not configured")
+                return {
+                    'transcript': '',
+                    'asr_confidence': 0.0,
+                    'segments': [],
+                    'language': 'vi',
+                    'error': 'Gemini API key not configured'
+                }
             
-            # Check audio duration
-            import librosa
+            genai.configure(api_key=gemini_api_key)
+            model_name = os.getenv('GEMINI_STT_MODEL', 'gemini-2.5-flash')
+            model = genai.GenerativeModel(model_name)
+            
+            # Check audio duration (optional, best-effort)
+            duration = 0.0
             try:
-                audio, sr = librosa.load(audio_path, sr=None, duration=1.0)  # Load first second
-                duration = len(audio) / sr
+                import soundfile as sf
+                f = sf.SoundFile(audio_path)
+                duration = len(f) / f.samplerate
                 logger.info(f"⏱️ Audio duration: {duration:.2f}s")
 
                 if duration < 0.5:
@@ -163,25 +222,33 @@ class MMSEAssessmentService:
             except Exception as e:
                 logger.warning(f"⚠️ Could not check audio duration: {e}")
 
-            # Transcribe
-            logger.info("🎤 Starting transcription...")
-            result = model.transcribe(audio_path, language='vi', word_timestamps=True)
+            # Transcribe with Gemini
+            logger.info("🎤 Starting Gemini transcription...")
+            
+            # Upload audio file
+            gemini_file = genai.upload_file(path=audio_path, mime_type="audio/wav")
+            
+            # Vietnamese-focused prompt
+            prompt = """
+Hãy chép lại CHÍNH XÁC nội dung tiếng Việt trong audio này với độ chính xác cao nhất:
 
-            # Log transcription result
-            raw_transcript = result['text'].strip()
+🎯 YÊU CẦU:
+- Chú ý dấu thanh tiếng Việt
+- Chú ý ngữ cảnh để hiểu đúng từ
+- Chỉ trả về transcript thuần văn bản
+- Không thêm từ không có trong audio
+
+Transcript:
+"""
+            
+            response = model.generate_content([gemini_file, prompt])
+            raw_transcript = (getattr(response, 'text', None) or "").strip()
             logger.info(f"📝 Raw transcript: '{raw_transcript}'")
 
-            # Extract confidence scores
-            word_confidences = []
-            if 'segments' in result:
-                for segment in result['segments']:
-                    if 'words' in segment:
-                        word_confidences.extend([w.get('probability', 0.5) for w in segment['words']])
-
-            avg_confidence = np.mean(word_confidences) if word_confidences else 0.5
-            logger.info(f"🎯 ASR confidence: {avg_confidence:.3f}")
-            logger.info(f"📊 Number of segments: {len(result.get('segments', []))}")
-            logger.info(f"🌐 Detected language: {result.get('language', 'unknown')}")
+            # Gemini doesn't provide word-level confidence, use default
+            avg_confidence = 0.8
+            logger.info(f"🎯 Default confidence: {avg_confidence:.3f}")
+            logger.info(f"🌐 Language: Vietnamese")
 
             # Validate transcript
             if not raw_transcript or len(raw_transcript.strip()) < 3:
@@ -277,21 +344,60 @@ class MMSEAssessmentService:
             for item_id, score in score_result['per_item_scores'].items():
                 logger.info(f"  {item_id}: {score}")
             
-            # Step 3: Extract features
+            # Step 3: Extract features using NEW MCIScreeningService (preferred)
             logger.info("🔍 BƯỚC 3: FEATURE EXTRACTION")
             logger.info(f"Extracting features for session {session_id}")
             feature_start = pd.Timestamp.now()
-            if not self.feature_extractor:
-                logger.error("❌ Feature extractor not available")
+            
+            features = {}
+            if self.mci_service:
+                try:
+                    logger.info("✅ Using NEW MCIScreeningService for feature extraction")
+                    # Use MCIScreeningService for full multimodal analysis
+                    mci_result = self.mci_service.analyze(
+                        audio_path=audio_path,
+                        transcript=transcription_result['transcript'],
+                        task_type='mmse_assessment',
+                        user_info=patient_info
+                    )
+                    
+                    if mci_result.success:
+                        # Combine acoustic and linguistic features
+                        features = {
+                            **mci_result.acoustic_features,
+                            **mci_result.linguistic_features,
+                            **mci_result.fused_features
+                        }
+                        logger.info(f"✅ Extracted {len(features)} features using NEW modules")
+                    else:
+                        logger.warning("⚠️ MCI service analysis failed, using legacy")
+                        raise Exception("MCI service analysis failed")
+                        
+                except Exception as e:
+                    logger.warning(f"⚠️ NEW modules failed: {e}, falling back to legacy")
+                    # Fallback to legacy
+                    if not self.feature_extractor:
+                        logger.error("❌ Neither NEW modules nor legacy feature extractor available")
+                        return {
+                            'session_id': session_id,
+                            'status': 'error',
+                            'error': 'Feature extractor not available'
+                        }
+                    features = self.feature_extractor.extract_all_features(
+                        session_data, audio_path, score_result['per_item_scores']
+                    )
+            elif self.feature_extractor:
+                logger.info("⚠️ Using legacy feature extractor")
+                features = self.feature_extractor.extract_all_features(
+                    session_data, audio_path, score_result['per_item_scores']
+                )
+            else:
+                logger.error("❌ No feature extractor available")
                 return {
                     'session_id': session_id,
                     'status': 'error',
                     'error': 'Feature extractor not available'
                 }
-
-            features = self.feature_extractor.extract_all_features(
-                session_data, audio_path, score_result['per_item_scores']
-            )
 
             # Log feature extraction results
             feature_end = pd.Timestamp.now()
@@ -300,16 +406,16 @@ class MMSEAssessmentService:
 
             # Log linguistic features
             logger.info("🗣️ Linguistic features:")
-            logger.info(f"  TTR: {features.get('TTR', 0):.3f}")
-            logger.info(f"  Idea density: {features.get('idea_density', 0):.3f}")
-            logger.info(f"  Fluency (F_flu): {features.get('F_flu', 0):.3f}")
+            logger.info(f"  TTR: {features.get('lex_ttr', features.get('TTR', 0)):.3f}")
+            logger.info(f"  Idea density: {features.get('sem_idea_density', features.get('idea_density', 0)):.3f}")
+            logger.info(f"  Fluency: {features.get('F_flu', 0):.3f}")
             logger.info(f"  Word count: {features.get('word_count', 0)}")
 
             # Log acoustic features
             logger.info("🎵 Acoustic features:")
             logger.info(f"  Speech rate: {features.get('speech_rate_wpm', 0):.1f} WPM")
             logger.info(f"  Pause rate: {(features.get('pause_rate', 0) * 100):.1f}%")
-            logger.info(f"  F0 variability: {features.get('f0_variability', 0):.1f} Hz")
+            logger.info(f"  F0 variability: {features.get('f0_variability', features.get('f0_f0_std', 0)):.1f} Hz")
             logger.info(f"  F0 mean: {features.get('f0_mean', 0):.1f} Hz")
             
             # Update scalars in score result
