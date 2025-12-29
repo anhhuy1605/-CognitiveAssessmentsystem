@@ -333,9 +333,9 @@ export default function UserInfoForm({
             {onBack && (
               <Button
                 onClick={onBack}
-                variant="outline"
+                variant="ghost"
                 size="lg"
-                className="flex-1 py-4 text-lg font-semibold border-2 hover:bg-gray-50"
+                className="flex-1 py-4 text-lg font-semibold border-2 border-gray-300 hover:bg-gray-50"
                 disabled={isSubmitting}
               >
                 Quay lại

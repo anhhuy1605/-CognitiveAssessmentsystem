@@ -148,7 +148,7 @@ const SHAPDashboard: React.FC<SHAPDashboardProps> = ({ sessionId, shapData: init
         <CardHeader>
           <div className="flex items-center justify-between">
             <CardTitle className="text-2xl">Kết quả Đánh giá Nhận thức</CardTitle>
-            <Button onClick={downloadReport} variant="outline" size="sm">
+            <Button onClick={downloadReport} variant="primaryOutline" size="sm">
               <Download className="w-4 h-4 mr-2" />
               Tải báo cáo
             </Button>
