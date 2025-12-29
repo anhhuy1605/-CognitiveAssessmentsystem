@@ -176,7 +176,7 @@ export default function CognitiveAssessmentPage() {
     }
     
     // Fallback to mock
-    const mockQuestions = getMockQuestions(language);
+    const mockQuestions = getMockQuestions();
     setQuestions(mockQuestions);
     setQuestionsLoaded(true);
   };

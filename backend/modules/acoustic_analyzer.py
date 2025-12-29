@@ -745,10 +745,25 @@ class AcousticAnalyzer:
         logger.info("📈 Extracting F0 contour...")
         f0_features = self.extract_f0_contour(audio_path)
         if f0_features:
-            # Don't include raw arrays in final features
+            # ✅ Lưu F0 metrics vào features chính (cho SHAP analysis)
             for k, v in f0_features.items():
                 if k not in ['f0_values', 'timestamps']:
                     features[f"f0_{k}"] = v
+            
+            # ✅ Lưu F0 contour đầy đủ (bao gồm raw arrays) cho visualization và SHAP
+            # Convert numpy arrays to lists for JSON serialization
+            f0_contour_full = {
+                'f0_values': f0_features.get('f0_values', []).tolist() if hasattr(f0_features.get('f0_values', []), 'tolist') else list(f0_features.get('f0_values', [])),
+                'timestamps': f0_features.get('timestamps', []).tolist() if hasattr(f0_features.get('timestamps', []), 'tolist') else list(f0_features.get('timestamps', [])),
+                'f0_mean': float(f0_features.get('f0_mean', 0.0)),
+                'f0_std': float(f0_features.get('f0_std', 0.0)),
+                'f0_range': float(f0_features.get('f0_range', 0.0)),
+                'f0_cv': float(f0_features.get('f0_cv', 0.0)),
+                'voiced_frames': int(f0_features.get('voiced_frames', 0)),
+                'voiced_ratio': float(f0_features.get('voiced_ratio', 0.0))
+            }
+            features['f0_contour'] = f0_contour_full
+            logger.info(f"✅ F0 contour saved: {len(f0_contour_full['f0_values'])} data points")
         
         # 3. Voice Quality Features
         logger.info("🔊 Extracting voice quality...")

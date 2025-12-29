@@ -629,8 +629,26 @@ class RealTimeVietnameseTranscriber:
             file_size = os.path.getsize(audio_path)
             logger.info(f"📁 File size: {file_size / 1024:.1f} KB")
             
+            # ✅ FIX: Reload API key from environment (supports hot-reload)
             # Check Gemini API key (support both GEMINI_API_KEY and GOOGLE_API_KEY)
             gemini_api_key = os.getenv('GEMINI_API_KEY') or os.getenv('GOOGLE_API_KEY')
+            
+            # ✅ Try to reload from config.env if not found in environment
+            if not gemini_api_key:
+                try:
+                    config_path = os.path.join(os.path.dirname(__file__), 'config.env')
+                    if os.path.exists(config_path):
+                        with open(config_path, 'r', encoding='utf-8') as f:
+                            for line in f:
+                                if line.startswith('GEMINI_API_KEY='):
+                                    gemini_api_key = line.split('=', 1)[1].strip()
+                                    # Set in environment for this session
+                                    os.environ['GEMINI_API_KEY'] = gemini_api_key
+                                    logger.info("✅ Reloaded GEMINI_API_KEY from config.env")
+                                    break
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to reload API key from config.env: {e}")
+            
             if not gemini_api_key:
                 return self._error_result("Gemini API key not configured (set GEMINI_API_KEY or GOOGLE_API_KEY)")
 
@@ -836,6 +854,19 @@ Please start transcribing the audio content:
                 }
                 
             except Exception as gemini_error:
+                error_str = str(gemini_error).lower()
+                is_quota_error = (
+                    'quota' in error_str or 
+                    '429' in error_str or 
+                    'rate limit' in error_str or
+                    'exceeded' in error_str
+                )
+                
+                if is_quota_error:
+                    logger.error(f"🚨 Gemini quota/rate limit exceeded: {gemini_error}")
+                    logger.warning("⚠️ Skipping transcription due to quota limit (Whisper fallback disabled)")
+                    return self._error_result(f"Gemini quota exceeded: {gemini_error}")
+                
                 logger.error(f"❌ Gemini transcription failed: {gemini_error}")
                 return self._error_result(f"Gemini transcription failed: {gemini_error}")
             

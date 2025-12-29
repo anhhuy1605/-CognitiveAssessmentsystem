@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Mic, Square, Loader2, CheckCircle, Brain, Volume2, User, Clock,
   ArrowRight, Home, Send, MessageCircle, Activity, FileText,
-  Shield, Eye, EyeOff, AlertCircle, Sparkles, HelpCircle
+  Shield, Eye, EyeOff, AlertCircle, Sparkles, HelpCircle, FileAudio, Upload
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -172,6 +172,7 @@ export default function MMSEChatbotPage() {
   const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // ============================================
   // EFFECTS
@@ -234,15 +235,38 @@ export default function MMSEChatbotPage() {
     const newErrors: Partial<Record<keyof UserInfo, string>> = {};
     
     if (!userInfo.name.trim()) newErrors.name = "Vui lòng nhập họ tên";
+    
+    // Age validation: 40-100 (v2.1 requirement)
     if (!userInfo.age.trim()) {
       newErrors.age = "Vui lòng nhập tuổi";
     } else {
       const age = parseInt(userInfo.age);
-      if (isNaN(age) || age < 1 || age > 120) newErrors.age = "Tuổi không hợp lệ (1-120)";
+      if (isNaN(age) || age < 40 || age > 100) {
+        newErrors.age = "Vui lòng nhập tuổi từ 40-100";
+      }
     }
-    if (!userInfo.gender) newErrors.gender = "Vui lòng chọn giới tính";
+    
+    // Gender validation: required, only male/female
+    if (!userInfo.gender || (userInfo.gender !== "male" && userInfo.gender !== "female")) {
+      newErrors.gender = "Vui lòng chọn giới tính";
+    }
+    
+    // Education validation: 0-25 years (v2.1 requirement)
     if (!userInfo.education_years.trim()) {
       newErrors.education_years = "Vui lòng nhập số năm học";
+    } else {
+      const eduYears = parseInt(userInfo.education_years);
+      if (isNaN(eduYears) || eduYears < 0 || eduYears > 25) {
+        newErrors.education_years = "Vui lòng nhập số năm học từ 0-25";
+      }
+    }
+    
+    // Location validation: required for orientation questions (v2.1 requirement)
+    if (!userInfo.city.trim()) {
+      newErrors.city = "Vui lòng nhập Tỉnh/Thành phố";
+    }
+    if (!userInfo.district.trim()) {
+      newErrors.district = "Vui lòng nhập Quận/Huyện";
     }
     
     setErrors(newErrors);
@@ -417,10 +441,91 @@ export default function MMSEChatbotPage() {
     }
   };
 
+  // Helper function to render content with hidden words blurred
+  const renderContentWithHiddenWords = (content: string, hiddenContent?: string[], isRevealed?: boolean) => {
+    if (!hiddenContent || hiddenContent.length === 0 || isRevealed) {
+      return content;
+    }
+
+    // Create a simple replacement approach: find and blur each hidden word
+    let processedContent = content;
+    const parts: JSX.Element[] = [];
+    let keyCounter = 0;
+    
+    // For each hidden word, find all occurrences and mark them
+    const markers: Array<{ index: number; length: number; word: string; original: string }> = [];
+    
+    hiddenContent.forEach(hiddenWord => {
+      const normalizedHidden = hiddenWord.toLowerCase().trim();
+      const regex = new RegExp(`\\b${normalizedHidden.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi');
+      let match;
+      
+      while ((match = regex.exec(content)) !== null) {
+        markers.push({
+          index: match.index,
+          length: match[0].length,
+          word: hiddenWord,
+          original: match[0] // Preserve original case
+        });
+      }
+    });
+    
+    // Sort markers by index
+    markers.sort((a, b) => a.index - b.index);
+    
+    // Remove overlapping markers (keep first occurrence)
+    const filteredMarkers: typeof markers = [];
+    let lastEnd = 0;
+    markers.forEach(marker => {
+      if (marker.index >= lastEnd) {
+        filteredMarkers.push(marker);
+        lastEnd = marker.index + marker.length;
+      }
+    });
+    
+    // Build parts array
+    let lastIndex = 0;
+    filteredMarkers.forEach(marker => {
+      // Add text before marker
+      if (marker.index > lastIndex) {
+        parts.push(
+          <span key={`text-${keyCounter++}`}>
+            {content.substring(lastIndex, marker.index)}
+          </span>
+        );
+      }
+      
+      // Add blurred hidden word
+      parts.push(
+        <span 
+          key={`hidden-${keyCounter++}`}
+          className="blur-sm opacity-40 select-none inline-block"
+          style={{ filter: 'blur(5px)', userSelect: 'none' }}
+          title="Nội dung ẩn"
+        >
+          {content.substring(marker.index, marker.index + marker.length)}
+        </span>
+      );
+      
+      lastIndex = marker.index + marker.length;
+    });
+    
+    // Add remaining text
+    if (lastIndex < content.length) {
+      parts.push(
+        <span key={`text-${keyCounter++}`}>
+          {content.substring(lastIndex)}
+        </span>
+      );
+    }
+    
+    return parts.length > 0 ? <>{parts}</> : content;
+  };
+
   const handleUserInput = async (text: string, audioBlob?: Blob) => {
     if (!session || !text.trim()) return;
     
-    // Add user message
+    // Add user message and reveal hidden content in one update
     const userMessage: Message = {
       id: `user_${Date.now()}`,
       type: "user",
@@ -431,7 +536,18 @@ export default function MMSEChatbotPage() {
 
     setSession(prev => {
       if (!prev) return prev;
-      return { ...prev, messages: [...prev.messages, userMessage] };
+      const messages = [...prev.messages];
+      
+      // ✅ REVEAL: Find the last bot message with hiddenContent and reveal it
+      for (let i = messages.length - 1; i >= 0; i--) {
+        if (messages[i].type === 'bot' && messages[i].hiddenContent && !messages[i].isRevealed) {
+          messages[i] = { ...messages[i], isRevealed: true };
+          break;
+        }
+      }
+      
+      // Add user message
+      return { ...prev, messages: [...messages, userMessage] };
     });
 
     setInputText("");
@@ -934,6 +1050,52 @@ export default function MMSEChatbotPage() {
     setIsRecording(false);
   };
 
+  // Handle file upload
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type
+    const validTypes = ['audio/wav', 'audio/mp3', 'audio/mpeg', 'audio/webm', 'audio/ogg', 'audio/m4a', 'audio/x-m4a'];
+    const isValidType = validTypes.includes(file.type) || file.name.match(/\.(wav|mp3|webm|ogg|m4a)$/i);
+    
+    if (!isValidType) {
+      alert('Vui lòng chọn file audio hợp lệ (WAV, MP3, WebM, OGG, M4A)');
+      return;
+    }
+
+    // Validate file size (max 10MB)
+    const maxSize = 10 * 1024 * 1024; // 10MB
+    if (file.size > maxSize) {
+      alert('File quá lớn. Vui lòng chọn file nhỏ hơn 10MB');
+      return;
+    }
+
+    // Convert File to Blob
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      if (event.target?.result) {
+        const blob = new Blob([event.target.result], { type: file.type });
+        setCurrentAudioBlob(blob);
+        
+        // Auto-transcribe the uploaded file
+        transcribeAudio(blob);
+        
+        // Show success message
+        console.log(`✅ File uploaded: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`);
+      }
+    };
+    reader.onerror = () => {
+      alert('Lỗi khi đọc file. Vui lòng thử lại.');
+    };
+    reader.readAsArrayBuffer(file);
+
+    // Reset input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
   const transcribeAudio = async (blob: Blob) => {
     setIsProcessing(true);
     try {
@@ -1098,14 +1260,17 @@ export default function MMSEChatbotPage() {
                       </label>
                       <Input
                         type="number"
-                        min="1"
-                        max="120"
+                        min="40"
+                        max="100"
                         value={userInfo.age}
                         onChange={(e) => setUserInfo({ ...userInfo, age: e.target.value })}
                         placeholder="65"
                         className={`h-12 text-lg border-2 rounded-xl ${errors.age ? "border-red-400" : "border-gray-200"}`}
                       />
                       {errors.age && <p className="text-red-500 text-sm mt-1">{errors.age}</p>}
+                      <p className="text-xs text-gray-500 mt-1">
+                        Hệ thống được thiết kế cho người từ 40-100 tuổi
+                      </p>
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -1119,52 +1284,69 @@ export default function MMSEChatbotPage() {
                         <option value="">Chọn giới tính</option>
                         <option value="male">Nam</option>
                         <option value="female">Nữ</option>
-                        <option value="other">Khác</option>
                       </select>
                       {errors.gender && <p className="text-red-500 text-sm mt-1">{errors.gender}</p>}
+                      <p className="text-xs text-gray-500 mt-1">
+                        Để hệ thống xưng hô đúng văn hóa (Ông/Bà)
+                      </p>
                     </div>
                   </div>
 
                   {/* Education */}
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Số năm học *
+                      Số năm đi học *
                     </label>
                     <Input
                       type="number"
                       min="0"
-                      max="30"
+                      max="25"
                       value={userInfo.education_years}
                       onChange={(e) => setUserInfo({ ...userInfo, education_years: e.target.value })}
                       placeholder="12"
                       className={`h-12 text-lg border-2 rounded-xl ${errors.education_years ? "border-red-400" : "border-gray-200"}`}
                     />
                     {errors.education_years && <p className="text-red-500 text-sm mt-1">{errors.education_years}</p>}
+                    <p className="text-xs text-gray-600 mt-1 mb-2">
+                      Ví dụ: Tiểu học 5 năm = 5, Trung học phổ thông = 12, Đại học 4 năm = 16
+                    </p>
+                    <div className="text-xs text-gray-500 space-y-1 bg-gray-50 p-3 rounded-lg">
+                      <div><strong>Ví dụ:</strong></div>
+                      <div>• Chưa đi học: 0 năm</div>
+                      <div>• Tiểu học (lớp 1-5): 5 năm</div>
+                      <div>• THCS (lớp 6-9): 9 năm</div>
+                      <div>• THPT (lớp 10-12): 12 năm</div>
+                      <div>• Đại học: 16 năm</div>
+                      <div>• Thạc sĩ: 18 năm</div>
+                      <div>• Tiến sĩ: 21 năm</div>
+                    </div>
                   </div>
 
                   {/* Location */}
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Tỉnh/Thành phố
+                        Tỉnh/Thành phố *
                       </label>
                       <Input
                         value={userInfo.city}
                         onChange={(e) => setUserInfo({ ...userInfo, city: e.target.value })}
-                        placeholder="Hà Nội"
-                        className="h-12 text-lg border-2 border-gray-200 rounded-xl"
+                        placeholder="Ví dụ: Hà Nội, Đà Nẵng, TP.HCM"
+                        className={`h-12 text-lg border-2 rounded-xl ${errors.city ? "border-red-400" : "border-gray-200"}`}
                       />
+                      {errors.city && <p className="text-red-500 text-sm mt-1">{errors.city}</p>}
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Quận/Huyện
+                        Quận/Huyện *
                       </label>
                       <Input
                         value={userInfo.district}
                         onChange={(e) => setUserInfo({ ...userInfo, district: e.target.value })}
-                        placeholder="Cầu Giấy"
-                        className="h-12 text-lg border-2 border-gray-200 rounded-xl"
+                        placeholder="Ví dụ: Quận Hoàn Kiếm, Huyện Hóc Môn"
+                        className={`h-12 text-lg border-2 rounded-xl ${errors.district ? "border-red-400" : "border-gray-200"}`}
                       />
+                      {errors.district && <p className="text-red-500 text-sm mt-1">{errors.district}</p>}
                     </div>
                   </div>
 
@@ -1415,7 +1597,13 @@ export default function MMSEChatbotPage() {
                           ? "bg-gradient-to-br from-green-50 to-emerald-50 border-2 border-green-200 text-gray-800 rounded-tl-sm"
                           : "bg-white border border-gray-200 text-gray-800 rounded-tl-sm"
                       }`}>
-                        <p className="whitespace-pre-wrap">{message.content}</p>
+                        <p className="whitespace-pre-wrap">
+                          {renderContentWithHiddenWords(
+                            message.content, 
+                            message.hiddenContent, 
+                            message.isRevealed
+                          )}
+                        </p>
                         
                         {/* Action Buttons */}
                         {message.actionButtons && message.actionButtons.length > 0 && (
@@ -1438,16 +1626,11 @@ export default function MMSEChatbotPage() {
                           </div>
                         )}
                         
-                        {/* Hidden Content Display */}
-                        {message.hiddenContent && !message.isRevealed && (
-                          <div className="mt-3 p-3 bg-gray-200 rounded-lg blur-sm select-none">
-                            <p className="text-gray-400">[Nội dung ẩn]</p>
-                          </div>
-                        )}
+                        {/* Revealed Hidden Content Indicator */}
                         {message.hiddenContent && message.isRevealed && (
-                          <div className="mt-3 p-3 bg-yellow-50 border-2 border-yellow-300 rounded-lg">
-                            <p className="font-semibold text-yellow-800">
-                              ✨ {message.hiddenContent.join(", ")}
+                          <div className="mt-3 p-2 bg-yellow-50 border border-yellow-200 rounded-lg">
+                            <p className="text-xs text-yellow-700 font-medium">
+                              ✨ Đã hiển thị: {message.hiddenContent.join(", ")}
                             </p>
                           </div>
                         )}
@@ -1510,6 +1693,24 @@ export default function MMSEChatbotPage() {
                     )}
                   </motion.button>
 
+                  {/* File Upload Button */}
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    onChange={handleFileUpload}
+                    accept="audio/*,.wav,.mp3,.webm,.ogg,.m4a"
+                    className="hidden"
+                  />
+                  <motion.button
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isProcessing || isRecording}
+                    className="w-14 h-14 rounded-full flex items-center justify-center shadow-lg transition-all bg-purple-500 hover:bg-purple-600 text-white"
+                    whileTap={{ scale: 0.95 }}
+                    title="Upload file audio từ máy tính"
+                  >
+                    <Upload className="w-6 h-6" />
+                  </motion.button>
+
                   {/* Mic Initialization Indicator */}
                   {isInitializingMic && (
                     <div className="px-3 py-1 bg-yellow-100 text-yellow-700 rounded-full text-sm">
@@ -1554,9 +1755,19 @@ export default function MMSEChatbotPage() {
                 <p className="mt-2 text-sm text-gray-500 text-center">
                   {isRecording 
                     ? "Đang ghi âm... Nhấn nút đỏ để dừng"
-                    : "Nhấn nút micro để ghi âm hoặc gõ câu trả lời"
+                    : "Nhấn nút micro để ghi âm, nút upload để chọn file audio, hoặc gõ câu trả lời"
                   }
                 </p>
+                
+                {/* Selected File Info */}
+                {currentAudioBlob && (
+                  <div className="mt-2 p-2 bg-green-50 border border-green-200 rounded-lg flex items-center gap-2">
+                    <FileAudio className="w-4 h-4 text-green-600" />
+                    <span className="text-sm text-green-700">
+                      ✅ File audio đã sẵn sàng ({((currentAudioBlob.size || 0) / 1024).toFixed(1)} KB)
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
           </motion.div>

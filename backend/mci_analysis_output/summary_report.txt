@@ -1,0 +1,144 @@
+================================================================================
+MCI/AD PATIENT AUDIO ANALYSIS - SUMMARY REPORT
+================================================================================
+Generated: 2025-12-29 00:03:29
+
+OVERALL SUMMARY
+--------------------------------------------------------------------------------
+Patient 1 (Hoàng Thị Hạnh): Moderate Risk (3/7 indicators)
+Patient 2 (Phạm thị chiến): Moderate Risk (3/7 indicators)
+Patient 3 (Quán cơm ABC 2): Moderate Risk (3/7 indicators)
+Patient 4 (Đoàn Bình): Moderate Risk (4/7 indicators)
+
+================================================================================
+PATIENT 1: Hoàng Thị Hạnh
+================================================================================
+
+BASIC METRICS:
+  Audio Duration: 87.60 seconds
+  Sample Rate: 16000 Hz
+  Speaking Time Ratio: 83.7%
+  Total Pause Time: 14.24 seconds
+
+ACOUSTIC FEATURES:
+  F0 Mean: 142.0 Hz
+  F0 Std: 46.2 Hz
+  F0 Range: 453.8 Hz
+  Speech Rate: 4.01 syllables/sec
+  Articulation Rate: 240.4 words/min
+  Jitter: 1.59%
+  Shimmer: 12.34%
+  Energy Mean: 0.0087
+  Energy Std: 0.0155
+  MFCC Variability: 36.9988
+
+MCI/AD INDICATORS DETECTED:
+  ⚠️  Pitch Instability (Std >30Hz)
+  ⚠️  Abnormal Jitter (>1.0%)
+  ⚠️  Abnormal Shimmer (>3.0%)
+
+  Risk Level: Moderate
+  Total Indicators: 3/7
+
+================================================================================
+PATIENT 2: Phạm thị chiến
+================================================================================
+
+BASIC METRICS:
+  Audio Duration: 272.94 seconds
+  Sample Rate: 16000 Hz
+  Speaking Time Ratio: 83.5%
+  Total Pause Time: 44.93 seconds
+
+ACOUSTIC FEATURES:
+  F0 Mean: 248.0 Hz
+  F0 Std: 60.0 Hz
+  F0 Range: 510.9 Hz
+  Speech Rate: 3.60 syllables/sec
+  Articulation Rate: 215.9 words/min
+  Jitter: 2.17%
+  Shimmer: 14.11%
+  Energy Mean: 0.0131
+  Energy Std: 0.0222
+  MFCC Variability: 33.2888
+
+MCI/AD INDICATORS DETECTED:
+  ⚠️  Pitch Instability (Std >30Hz)
+  ⚠️  Abnormal Jitter (>1.0%)
+  ⚠️  Abnormal Shimmer (>3.0%)
+
+  Risk Level: Moderate
+  Total Indicators: 3/7
+
+================================================================================
+PATIENT 3: Quán cơm ABC 2
+================================================================================
+
+BASIC METRICS:
+  Audio Duration: 13.14 seconds
+  Sample Rate: 16000 Hz
+  Speaking Time Ratio: 86.1%
+  Total Pause Time: 1.82 seconds
+
+ACOUSTIC FEATURES:
+  F0 Mean: 230.0 Hz
+  F0 Std: 60.4 Hz
+  F0 Range: 388.1 Hz
+  Speech Rate: 6.47 syllables/sec
+  Articulation Rate: 388.1 words/min
+  Jitter: 2.63%
+  Shimmer: 16.40%
+  Energy Mean: 0.0151
+  Energy Std: 0.0154
+  MFCC Variability: 38.6096
+
+MCI/AD INDICATORS DETECTED:
+  ⚠️  Pitch Instability (Std >30Hz)
+  ⚠️  Abnormal Jitter (>1.0%)
+  ⚠️  Abnormal Shimmer (>3.0%)
+
+  Risk Level: Moderate
+  Total Indicators: 3/7
+
+================================================================================
+PATIENT 4: Đoàn Bình
+================================================================================
+
+BASIC METRICS:
+  Audio Duration: 144.99 seconds
+  Sample Rate: 16000 Hz
+  Speaking Time Ratio: 83.7%
+  Total Pause Time: 23.62 seconds
+
+ACOUSTIC FEATURES:
+  F0 Mean: 167.6 Hz
+  F0 Std: 68.7 Hz
+  F0 Range: 497.3 Hz
+  Speech Rate: 3.52 syllables/sec
+  Articulation Rate: 211.5 words/min
+  Jitter: 2.58%
+  Shimmer: 17.90%
+  Energy Mean: 0.0062
+  Energy Std: 0.0084
+  MFCC Variability: 33.5868
+
+MCI/AD INDICATORS DETECTED:
+  ⚠️  Pitch Instability (Std >30Hz)
+  ⚠️  Abnormal Jitter (>1.0%)
+  ⚠️  Abnormal Shimmer (>3.0%)
+  ⚠️  Energy Decline Over Time (Fatigue)
+
+  Risk Level: Moderate
+  Total Indicators: 4/7
+
+================================================================================
+RISK RANKING (Highest to Lowest)
+================================================================================
+1. Patient 4 (Đoàn Bình): Moderate Risk (4 indicators)
+2. Patient 1 (Hoàng Thị Hạnh): Moderate Risk (3 indicators)
+3. Patient 2 (Phạm thị chiến): Moderate Risk (3 indicators)
+4. Patient 3 (Quán cơm ABC 2): Moderate Risk (3 indicators)
+
+================================================================================
+END OF REPORT
+================================================================================

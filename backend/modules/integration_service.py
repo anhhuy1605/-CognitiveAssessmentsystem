@@ -87,7 +87,6 @@ class MCIScreeningService:
     
     def __init__(self, 
                  model_path: Optional[str] = None,
-                 vncorenlp_path: Optional[str] = None,
                  use_phobert: bool = True):
         """
         Initialize MCI Screening Service
@@ -95,7 +94,6 @@ class MCIScreeningService:
         Args:
             model_path: Path to pre-trained prediction model (optional)
                        If None, will auto-detect newest model
-            vncorenlp_path: Path to VnCoreNLP installation (optional)
             use_phobert: Whether to use PhoBERT for semantic analysis
         """
         self.errors = []
@@ -118,15 +116,14 @@ class MCIScreeningService:
         else:
             logger.warning("⚠️ AcousticAnalyzer not available")
         
-        # Initialize linguistic analyzer
+        # Initialize linguistic analyzer (using underthesea + PhoBERT, no VnCoreNLP)
         self.linguistic_analyzer = None
         if LINGUISTIC_AVAILABLE:
             try:
                 self.linguistic_analyzer = VietnameseLinguisticAnalyzer(
-                    vncorenlp_path=vncorenlp_path,
                     use_phobert=use_phobert
                 )
-                logger.info("✅ LinguisticAnalyzer initialized")
+                logger.info("✅ LinguisticAnalyzer initialized (underthesea + PhoBERT)")
             except Exception as e:
                 logger.error(f"Failed to initialize LinguisticAnalyzer: {e}")
                 self.errors.append(f"LinguisticAnalyzer: {e}")

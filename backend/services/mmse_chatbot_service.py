@@ -39,11 +39,12 @@ except ImportError:
 
 
 class TestDomain(Enum):
-    """MMSE Test Domains following clinical protocol"""
+    """MMSE Test Domains following clinical protocol (v2.1_CORRECTED)"""
     INIT = "init"
     ORIENTATION = "orientation"
     REGISTRATION = "registration"
     ATTENTION_CALCULATION = "attention_calculation"
+    EXECUTIVE_FUNCTION = "executive_function"  # ✅ v2.1: Added Executive Function domain
     OPEN_QUESTIONS = "open_questions"  # Supplementary for linguistic analysis
     RECALL = "recall"
     LANGUAGE = "language"
@@ -98,7 +99,23 @@ class SessionState:
     # Timestamps
     started_at: str = ""
     completed_at: Optional[str] = None
-    recall_allowed_after: Optional[str] = None  # 5 minutes after registration
+    recall_allowed_after: Optional[str] = None  # ✅ v2.1: 360 seconds (6 minutes) after registration
+    
+    # ✅ v2.1: Serial 7s tracking
+    serial_7s_answers: List[int] = field(default_factory=list)
+    serial_7s_started: bool = False
+    serial_7s_stopped: bool = False
+    serial_7s_current_value: int = 100  # Start from 100
+    
+    # ✅ v2.1: Executive Function - Verbal Fluency tracking
+    verbal_fluency_start_time: Optional[float] = None
+    verbal_fluency_animals: List[str] = field(default_factory=list)
+    verbal_fluency_completed: bool = False
+    
+    # ✅ v2.1: Clock Drawing state
+    clock_drawing_mode: str = "visual"  # "visual" or "verbal"
+    clock_drawing_data: Optional[Dict] = None  # For storing clock image/coordinates
+    clock_drawing_target_time: str = "11:10"  # Target time for clock drawing
     
     # User info
     user_info: Dict[str, Any] = field(default_factory=dict)
@@ -134,15 +151,17 @@ class MMSEChatbotService:
         self.questions_data = self._load_questions()
         self.sessions: Dict[str, SessionState] = {}
         
-        # Domain order (clinical protocol)
+        # Domain order (clinical protocol) - v2.1_CORRECTED
         self.domain_order = [
-            TestDomain.ORIENTATION,
-            TestDomain.REGISTRATION,
-            TestDomain.ATTENTION_CALCULATION,
-            TestDomain.OPEN_QUESTIONS,
-            TestDomain.RECALL,
-            TestDomain.LANGUAGE,
-            TestDomain.VISUOSPATIAL,
+            TestDomain.ORIENTATION,        # 10 points
+            TestDomain.REGISTRATION,       # 3 points
+            TestDomain.ATTENTION_CALCULATION,  # 5 points
+            TestDomain.EXECUTIVE_FUNCTION,  # ✅ v2.1: 3 points (verbal fluency 2 + abstraction 1)
+            TestDomain.OPEN_QUESTIONS,     # 0 points (feature extraction only)
+            TestDomain.RECALL,             # 3 points
+            TestDomain.LANGUAGE,           # 8 points
+            TestDomain.VISUOSPATIAL,      # 3 points
+            # Total: 35 points (v2.1_CORRECTED)
         ]
         
         # Initialize linguistic analyzer from MCI modules
@@ -150,6 +169,18 @@ class MMSEChatbotService:
         try:
             from modules.linguistic_analyzer import VietnameseLinguisticAnalyzer
             self.linguistic_analyzer = VietnameseLinguisticAnalyzer(use_phobert=True)
+            logger.info("✅ Linguistic Analyzer initialized")
+        except Exception as e:
+            logger.warning(f"⚠️ Linguistic Analyzer not available: {e}")
+        
+        # ✅ v2.1: Initialize Clock Drawing Generator
+        self.clock_generator = None
+        try:
+            from services.clock_drawing_generator import ClockDrawingGenerator
+            self.clock_generator = ClockDrawingGenerator()
+            logger.info("✅ Clock Drawing Generator initialized")
+        except Exception as e:
+            logger.warning(f"⚠️ Clock Drawing Generator not available: {e}")
             logger.info("✅ Linguistic Analyzer integrated")
         except ImportError as e:
             logger.warning(f"⚠️ Linguistic Analyzer not available: {e}")
@@ -208,31 +239,82 @@ class MMSEChatbotService:
         return self.sessions.get(session_id)
     
     def set_greeting(self, session_id: str, greeting: str) -> bool:
-        """Set addressee term (ông/bà)"""
+        """
+        ✅ v2.1_CORRECTED: Set addressee term (ông/bà) based on gender
+        
+        Pronoun mapping from JSON:
+        - male → "Ông"
+        - female → "Bà"
+        - default → "Bạn"
+        """
         state = self.get_session(session_id)
         if not state:
             return False
         
         # Normalize greeting
         greeting_lower = greeting.lower().strip()
-        if "ông" in greeting_lower or "ong" in greeting_lower:
+        if "ông" in greeting_lower or "ong" in greeting_lower or greeting_lower == "male":
             state.greeting = "Ông"
-        elif "bà" in greeting_lower or "ba" in greeting_lower:
+        elif "bà" in greeting_lower or "ba" in greeting_lower or greeting_lower == "female":
             state.greeting = "Bà"
         else:
-            # Default based on common usage
-            state.greeting = "Anh/chị"
+            # Default
+            state.greeting = "Bạn"
         
         logger.info(f"✅ Session {session_id}: Greeting set to '{state.greeting}'")
         return True
     
-    def get_introduction_message(self) -> str:
-        """Get chatbot introduction message - more natural and friendly"""
+    def get_pronoun(self, session_id: str, capitalize: bool = False) -> str:
+        """
+        ✅ v2.1_CORRECTED: Get pronoun based on user gender
+        
+        Args:
+            session_id: Session ID
+            capitalize: Whether to return capitalized version (Ông/Bà) or lowercase (ông/bà)
+        
+        Returns:
+            Pronoun string
+        """
+        state = self.get_session(session_id)
+        if not state:
+            return "Bạn" if capitalize else "bạn"
+        
+        pronoun = state.greeting if state.greeting else "Bạn"
+        return pronoun if capitalize else pronoun.lower()
+    
+    def get_introduction_message(self, session_id: Optional[str] = None) -> str:
+        """
+        ✅ v2.1_CORRECTED: Get greeting messages from JSON
+        
+        Returns greeting flow with 4 messages as per JSON specification
+        """
+        # Get pronoun from session if available
+        pronoun = "Bạn"
+        pronoun_lower = "bạn"
+        if session_id:
+            state = self.get_session(session_id)
+            if state and state.greeting:
+                pronoun = state.greeting
+                pronoun_lower = state.greeting.lower()
+        
+        # Try to load from JSON v2.1 structure
+        if 'questions' in self.questions_data:
+            greeting_data = self.questions_data.get('questions', {}).get('greeting', {})
+            messages = greeting_data.get('messages', [])
+            if messages:
+                # Format messages with pronouns
+                formatted_messages = []
+                for msg in messages:
+                    formatted = self._replace_greeting(msg, pronoun)
+                    formatted_messages.append(formatted)
+                return "\n\n".join(formatted_messages)
+        
+        # Fallback: Default greeting from JSON structure
         return (
-            "Chào bạn nhé! Mình là Cá Vàng, bạn bè ảo của bạn đây. "
-            "Hôm nay chúng ta sẽ cùng nhau làm một bài kiểm tra nhỏ về trí nhớ và khả năng suy nghĩ thôi. "
-            "Mình sẽ hỏi bạn vài câu hỏi đơn giản lắm, bạn chỉ cần trả lời bằng giọng nói bình thường là được. "
-            "Đừng lo lắng gì cả, mình sẽ hướng dẫn bạn từng bước một cách nhẹ nhàng nhé!"
+            f"Xin chào {pronoun}! Tôi là trợ lý ảo, sẽ giúp {pronoun} làm bài kiểm tra sức khỏe nhận thức hôm nay.\n\n"
+            f"Bài kiểm tra này gồm nhiều câu hỏi về thời gian, địa điểm, trí nhớ, và một số câu tính toán đơn giản.\n\n"
+            f"Toàn bộ bài kiểm tra sẽ mất khoảng 15-20 phút. {pronoun} cứ thư giãn và trả lời tự nhiên nhé!\n\n"
+            f"Chúng ta bắt đầu nhé {pronoun}!"
         )
     
     def get_greeting_question(self) -> str:
@@ -276,16 +358,25 @@ class MMSEChatbotService:
             return self._advance_to_next_domain(session_id)
         
         question = questions[index]
-        # ✅ FIX: Use chatbot_message from JSON (not question_text)
+        # ✅ v2.1_CORRECTED: Use "question" field from new JSON structure, fallback to old fields
         question_text = self._replace_greeting(
-            question.get("chatbot_message", question.get("question_text", "")), 
+            question.get("question", question.get("chatbot_message", question.get("question_text", ""))), 
             state.greeting
         )
         
-        # ✅ FIX: Only add separate instruction field for FIRST question in domain
-        # Most questions already have instruction in chatbot_message, so we don't duplicate
-        # Only add separate instruction if it exists AND it's the first question
-        if index == 0:
+        # ✅ v2.1_CORRECTED: Handle instruction fields (instruction_part1, instruction_part2)
+        # For registration domain, combine instruction_part1 and instruction_part2
+        if domain == TestDomain.REGISTRATION and index == 0:
+            instruction_part1 = question.get("instruction_part1", "")
+            instruction_part2 = question.get("instruction_part2", "")
+            if instruction_part1:
+                instruction_part1 = self._replace_greeting(instruction_part1, state.greeting)
+                question_text = f"{instruction_part1}\n\n{question_text}"
+            if instruction_part2:
+                instruction_part2 = self._replace_greeting(instruction_part2, state.greeting)
+                question_text = f"{question_text}\n\n{instruction_part2}"
+        elif index == 0:
+            # For other domains, use single instruction field
             instruction = question.get("instruction", "")
             if instruction and instruction not in question_text:
                 instruction = self._replace_greeting(instruction, state.greeting)
@@ -304,19 +395,26 @@ class MMSEChatbotService:
             "completed": False
         }
         
-        # Special handling for Registration
+        # ✅ v2.1_CORRECTED: Special handling for Registration
         if domain == TestDomain.REGISTRATION:
-            metadata["words"] = question.get("word_list", state.registration_words)
+            # v2.1 uses "words" field instead of "word_list"
+            registration_words = question.get("words", question.get("word_list", state.registration_words))
+            metadata["words"] = registration_words
+            # Store words for recall later
+            if "words" in question:
+                state.registration_words = registration_words
             metadata["instruction_after"] = self._replace_greeting(
                 question.get("instruction_after", ""), state.greeting
             )
         
-        # Check if Recall is allowed (5 min delay)
+        # ✅ v2.1_CORRECTED: Check if Recall is allowed (6 min = 360 seconds minimum delay)
         if domain == TestDomain.RECALL:
             if not self._check_recall_allowed(state):
                 remaining = self._get_recall_wait_time(state)
+                minutes = remaining // 60
+                seconds = remaining % 60
                 return (
-                    f"Vui lòng chờ thêm {remaining} giây trước khi tiếp tục phần nhớ lại.",
+                    f"Vui lòng chờ thêm {minutes} phút {seconds} giây trước khi tiếp tục phần nhớ lại.",
                     {"waiting_for_recall": True, "wait_seconds": remaining}
                 )
         
@@ -385,12 +483,12 @@ class MMSEChatbotService:
                 # Store score in state
                 state.question_scores[actual_question_id] = score_result['points_earned']
                 
-                # ✅ Calculate total score in real-time
+                # ✅ Calculate total score in real-time (v2.1: 35-point scale)
                 if state.total_score is None:
                     state.total_score = 0
                 state.total_score += score_result['points_earned']
                 
-                logger.info(f"✅ Scored question {actual_question_id}: {score_result['points_earned']}/{score_result['points_possible']} → Total: {state.total_score}/30")
+                logger.info(f"✅ Scored question {actual_question_id}: {score_result['points_earned']}/{score_result['points_possible']} → Total: {state.total_score}/35")
             except ValueError as ve:
                 # Question not found in JSON - skip scoring for this question
                 logger.warning(f"⚠️ Question {actual_question_id} not found in JSON: {ve}")
@@ -416,13 +514,108 @@ class MMSEChatbotService:
         
         state.responses[domain.value].append(response)
         
+        # ✅ v2.1: Special handling for Serial 7s (auto-stop after 5 answers)
+        if domain == TestDomain.ATTENTION_CALCULATION and actual_question_id == "attn_serial_sub":
+            if not state.serial_7s_started:
+                state.serial_7s_started = True
+                state.serial_7s_current_value = 100
+                state.serial_7s_answers = []
+            
+            # Try to extract number from answer
+            import re
+            numbers = re.findall(r'\d+', answer)
+            if numbers:
+                try:
+                    user_value = int(numbers[0])
+                    state.serial_7s_answers.append(user_value)
+                    state.serial_7s_current_value -= 7
+                    
+                    # Check if we have 5 answers (auto-stop)
+                    if len(state.serial_7s_answers) >= 5:
+                        state.serial_7s_stopped = True
+                        logger.info(f"✅ Serial 7s completed: {state.serial_7s_answers}")
+                        # Move to next domain after this
+                        state.current_question_index += 1
+                        return self._advance_to_next_domain(session_id)
+                    else:
+                        # Continue asking for next number
+                        next_expected = state.serial_7s_current_value
+                        pronoun = self.get_pronoun(session_id, False)
+                        next_question = f"Tiếp tục nhé {pronoun}! Lấy {user_value} trừ 7 bằng bao nhiêu?"
+                        metadata['serial_7s'] = {
+                            'answers_so_far': state.serial_7s_answers,
+                            'next_expected': next_expected,
+                            'remaining': 5 - len(state.serial_7s_answers)
+                        }
+                        return next_question, metadata
+                except ValueError:
+                    pass
+        
+        # ✅ v2.1: Special handling for Executive Function - Verbal Fluency
+        if domain == TestDomain.EXECUTIVE_FUNCTION and actual_question_id == "exec_verbal_fluency":
+            if not state.verbal_fluency_started:
+                state.verbal_fluency_started = True
+                state.verbal_fluency_start_time = time.time()
+                state.verbal_fluency_animals = []
+            
+            # Extract animal names from answer
+            # Simple extraction - in production, use NLP
+            animals = self._extract_animals_from_text(answer)
+            state.verbal_fluency_animals.extend(animals)
+            
+            elapsed = time.time() - (state.verbal_fluency_start_time or 0)
+            remaining = max(0, 60 - elapsed)
+            
+            if remaining <= 0:
+                state.verbal_fluency_completed = True
+                # Score based on count
+                count = len(set(state.verbal_fluency_animals))  # Unique animals
+                if count >= 15:
+                    score = 2
+                elif count >= 9:
+                    score = 1
+                else:
+                    score = 0
+                
+                state.question_scores[actual_question_id] = score
+                if state.total_score is None:
+                    state.total_score = 0
+                state.total_score += score
+                
+                pronoun = self.get_pronoun(session_id, True)
+                feedback = f"Cảm ơn {pronoun}! {pronoun} đã kể được {count} con vật."
+                state.current_question_index += 1
+                return feedback, {'verbal_fluency_completed': True, 'count': count, 'score': score}
+            else:
+                # Continue - prompt if silent
+                if elapsed > 5 and len(state.verbal_fluency_animals) == 0:
+                    pronoun = self.get_pronoun(session_id, False)
+                    return f"Còn con gì nữa không {pronoun}?", {'verbal_fluency_ongoing': True, 'remaining': remaining}
+                elif elapsed >= 30 and elapsed < 50:
+                    return "Rất tốt! Hãy tiếp tục nhé!", {'verbal_fluency_ongoing': True, 'remaining': remaining}
+                elif elapsed >= 50:
+                    pronoun = self.get_pronoun(session_id, False)
+                    return f"Còn 10 giây nữa {pronoun}!", {'verbal_fluency_ongoing': True, 'remaining': remaining}
+        
+        # ✅ v2.1: Special handling for Clock Drawing
+        if domain == TestDomain.VISUOSPATIAL and actual_question_id == "visual_clock_drawing":
+            if not state.clock_drawing_data and self.clock_generator:
+                # Generate clock image
+                target_time = state.clock_drawing_target_time
+                img_base64, clock_data = self.clock_generator.generate_clock_image(target_time)
+                state.clock_drawing_data = clock_data
+                metadata['clock_image'] = img_base64
+                metadata['clock_data'] = clock_data
+                metadata['target_time'] = target_time
+                logger.info(f"✅ Generated clock image for {target_time}")
+        
         # Special handling for Registration
         if domain == TestDomain.REGISTRATION:
             state.registration_time = datetime.now().isoformat()
-            # Set recall allowed time (5 minutes later)
-            recall_time = datetime.now().timestamp() + 5 * 60
+            # ✅ v2.1_CORRECTED: Set recall allowed time (6 minutes = 360 seconds minimum)
+            recall_time = datetime.now().timestamp() + 360  # 6 minutes minimum
             state.recall_allowed_after = datetime.fromtimestamp(recall_time).isoformat()
-            logger.info(f"✅ Registration completed. Recall allowed after {state.recall_allowed_after}")
+            logger.info(f"✅ Registration completed. Recall allowed after {state.recall_allowed_after} (6 min delay)")
         
         # Move to next question
         state.current_question_index += 1
@@ -435,15 +628,15 @@ class MMSEChatbotService:
         # ✅ REAL-TIME: Get next question
         next_question, metadata = self.get_current_question(session_id)
         
-        # ✅ REAL-TIME: Add score update to metadata
+        # ✅ REAL-TIME: Add score update to metadata (v2.1: 35-point scale)
         if score_result:
             metadata['score_update'] = {
                 'question_id': actual_question_id,
                 'points_earned': score_result['points_earned'],
                 'points_possible': score_result['points_possible'],
                 'total_score': state.total_score or 0,
-                'max_score': 30,
-                'percentage': round(((state.total_score or 0) / 30) * 100, 1),
+                'max_score': 35,  # ✅ v2.1_CORRECTED: 35 points total
+                'percentage': round(((state.total_score or 0) / 35) * 100, 1),
                 'is_correct': score_result.get('is_correct', False),
                 'feedback': score_result.get('feedback', '')
             }
@@ -504,10 +697,40 @@ class MMSEChatbotService:
         # Calculate all scores NOW
         self._calculate_all_scores(state)
         
-        # Perform multimodal MCI analysis using NEW MCIScreeningService
+        # ✅ v2.1: Calculate adjusted score with age & education
+        adjusted_score_result = None
+        if state.total_score is not None and state.user_info:
+            try:
+                from services.mmse_scoring_v21 import calculate_adjusted_score, get_risk_from_adjusted_score
+                
+                age = int(state.user_info.get('age', 65))
+                education_years = int(state.user_info.get('education_years', 12))
+                raw_score = float(state.total_score)
+                
+                # Calculate adjusted score
+                adjusted_score_result = calculate_adjusted_score(
+                    raw_score=raw_score,
+                    age=age,
+                    education_years=education_years
+                )
+                
+                # Get risk classification from adjusted score
+                risk_classification = get_risk_from_adjusted_score(
+                    adjusted_score_result.adjusted_score,
+                    education_years
+                )
+                
+                logger.info(f"✅ v2.1 Adjusted Score: {adjusted_score_result.adjusted_score:.1f} (raw: {raw_score:.1f})")
+                logger.info(f"   Risk Classification: {risk_classification}")
+                
+            except Exception as e:
+                logger.warning(f"⚠️ Adjusted score calculation failed: {e}")
+                adjusted_score_result = None
+        
+        # ✅ v2.1: Perform multimodal MCI analysis with NEW pipeline
         if self.mci_service:
             try:
-                logger.info("🧬 Running multimodal MCI analysis with MCIScreeningService...")
+                logger.info("🧬 Running multimodal MCI analysis (v2.1 pipeline)...")
                 
                 # Aggregate all acoustic features (take mean across all questions)
                 all_acoustic = {}
@@ -529,144 +752,292 @@ class MMSEChatbotService:
                 # Collect linguistic features
                 linguistic_features = state.linguistic_features or {}
                 
-                # Use MCIScreeningService for prediction (NEW method)
-                # Combine all user responses for transcript
-                all_responses = []
-                for domain_responses in state.responses.values():
-                    for response in domain_responses:
-                        if response.user_answer:
-                            all_responses.append(response.user_answer)
-                combined_transcript = " ".join(all_responses)
+                # ✅ v2.1: Use NEW multimodal integration pipeline
+                from services.mmse_scoring_v21 import calculate_multimodal_risk
                 
-                # Use MCI service to analyze (if we have audio or transcript)
-                if combined_transcript or avg_acoustic:
-                    # Try to find audio file from responses
-                    audio_file_path = None
-                    for domain_responses in state.responses.values():
-                        for response in domain_responses:
-                            if response.audio_file and os.path.exists(response.audio_file):
-                                audio_file_path = response.audio_file
-                                break
-                        if audio_file_path:
-                            break
-                    
-                    # Use MCIScreeningService for full analysis
-                    mci_result = self.mci_service.analyze(
-                        audio_path=audio_file_path,
-                        transcript=combined_transcript if combined_transcript else None,
-                        task_type='mmse_assessment',
-                        user_info=state.user_info
-                    )
-                    
-                    if mci_result.success and mci_result.mci_prediction:
-                        mci_probability = mci_result.mci_prediction.get('mci_probability', 0.5)
-                        mmse_estimate = mci_result.mmse_estimate
-                        logger.info(f"✅ MCI service prediction: prob={mci_probability:.2f}, MMSE={mmse_estimate:.1f}")
-                    else:
-                        # Fallback to rule-based if service failed
-                        logger.warning("⚠️ MCI service analysis failed, using rule-based fallback")
-                        mci_probability = self._estimate_mci_probability(
-                            avg_acoustic, linguistic_features, state.total_score or 0
-                        )
-                        mmse_estimate = state.total_score or 0
-                else:
-                    # No data, use rule-based
-                    logger.warning("⚠️ No transcript or acoustic features, using rule-based")
-                    mci_probability = self._estimate_mci_probability(
-                        avg_acoustic, linguistic_features, state.total_score or 0
-                    )
-                    mmse_estimate = state.total_score or 0
+                # Prepare MMSE data for multimodal integration
+                mmse_data = {
+                    'raw_score': float(state.total_score or 0),
+                    'adjusted_score': adjusted_score_result.adjusted_score if adjusted_score_result else float(state.total_score or 0),
+                    'education_years': int(state.user_info.get('education_years', 12)),
+                    'age': int(state.user_info.get('age', 65))
+                }
                 
-                # Store comprehensive MCI result from MCIScreeningService
-                if mci_result.success and mci_result.mci_prediction:
-                    state.mci_result = {
-                        'acoustic_feature_count': len(mci_result.acoustic_features),
-                        'linguistic_feature_count': len(mci_result.linguistic_features),
-                        'mmse_score': state.total_score,
-                        'mmse_estimate_from_mci': mmse_estimate,
-                        'mci_probability': mci_probability,
-                        'mci_class': mci_result.mci_prediction.get('mci_class', 'Unknown'),
-                        'confidence': mci_result.confidence,
-                        'severity': mci_result.severity,
-                        'risk_level': 'HIGH' if mci_probability > 0.6 else 'MODERATE' if mci_probability > 0.3 else 'LOW',
-                        'risk_factors': mci_result.risk_factors,
-                        'recommendations': mci_result.recommendations,
-                        'interpretation': self._interpret_mci_probability(mci_probability),
-                        'model_used': 'MCIScreeningService (newest modules)'
-                    }
-                else:
-                    # Fallback result
-                    state.mci_result = {
-                        'acoustic_feature_count': len(avg_acoustic),
-                        'linguistic_feature_count': len(linguistic_features),
-                        'mmse_score': state.total_score,
-                        'mci_probability': mci_probability,
-                        'risk_level': 'HIGH' if mci_probability > 0.6 else 'MODERATE' if mci_probability > 0.3 else 'LOW',
-                        'interpretation': self._interpret_mci_probability(mci_probability),
-                        'model_used': 'Rule-based (fallback)'
-                    }
+                # Calculate multimodal risk using v2.1 pipeline
+                multimodal_result = calculate_multimodal_risk(
+                    mmse_data=mmse_data,
+                    acoustic_features=avg_acoustic if avg_acoustic else None,
+                    linguistic_features=linguistic_features if linguistic_features else None
+                )
                 
-                logger.info(f"✅ MCI analysis complete: {mci_probability:.1%} probability, {state.mci_result.get('risk_level', 'UNKNOWN')} risk")
+                # Store comprehensive result
+                state.mci_result = {
+                    'version': 'v2.1',
+                    'raw_mmse_score': mmse_data['raw_score'],
+                    'adjusted_mmse_score': mmse_data['adjusted_score'],
+                    'age_penalty': adjusted_score_result.age_penalty if adjusted_score_result else 0.0,
+                    'education_bonus': adjusted_score_result.education_bonus if adjusted_score_result else 0.0,
+                    'education_group': adjusted_score_result.education_group if adjusted_score_result else 'medium_education',
+                    'acoustic_feature_count': len(avg_acoustic),
+                    'linguistic_feature_count': len(linguistic_features),
+                    'combined_risk_score': multimodal_result.combined_risk_score,
+                    'risk_level': multimodal_result.risk_level,
+                    'risk_components': {
+                        'mmse': multimodal_result.mmse_risk_score,
+                        'acoustic': multimodal_result.acoustic_risk_score,
+                        'linguistic': multimodal_result.linguistic_risk_score
+                    },
+                    'risk_weights': {
+                        'mmse': 0.30,
+                        'acoustic': 0.30,
+                        'linguistic': 0.40
+                    },
+                    'interpretation': self._interpret_risk_level_v21(multimodal_result.risk_level),
+                    'model_used': 'v2.1 Multimodal Integration (MMSE + Acoustic + Linguistic)'
+                }
+                
+                logger.info(f"✅ v2.1 Multimodal analysis complete:")
+                logger.info(f"   Combined Risk: {multimodal_result.combined_risk_score:.3f}")
+                logger.info(f"   Risk Level: {multimodal_result.risk_level}")
+                
             except Exception as e:
-                logger.warning(f"⚠️ MCI analysis failed: {e}")
+                logger.warning(f"⚠️ v2.1 Multimodal analysis failed: {e}")
+                import traceback
+                traceback.print_exc()
                 state.mci_result = None
         
-        # Get classification
-        classification = self._classify_score(state.total_score or 0)
+        # ✅ v2.1: Get classification from adjusted score if available
+        if adjusted_score_result:
+            classification = get_risk_from_adjusted_score(
+                adjusted_score_result.adjusted_score,
+                int(state.user_info.get('education_years', 12))
+            )
+            # Convert to readable format
+            classification_map = {
+                'on': 'Ổn - Chức năng nhận thức bình thường',
+                'nguy_co_nhe': 'Nguy cơ nhẹ - Suy giảm nhận thức nhẹ (MCI)',
+                'nguy_co_cao': 'Nguy cơ cao - Suy giảm nhận thức trung bình đến nặng'
+            }
+            classification = classification_map.get(classification, classification)
+        else:
+            # Fallback to old classification
+            classification = self._classify_score(state.total_score or 0)
         state.classification = classification
         
-        # Generate completion message - more natural and friendly
-        greeting_term = state.greeting.lower() if state.greeting else "bạn"
-
-        message = (
-            f"🎉 Chúc mừng {greeting_term}! Chúng ta đã hoàn thành bài kiểm tra rồi!\n\n"
-            f"Đây là kết quả của {greeting_term} nhé:\n\n"
-            f"**Tổng điểm MMSE:** {state.total_score}/30 điểm\n"
-            f"**Phân loại:** {classification}\n\n"
-            f"Chi tiết từng phần:\n"
-        )
+        # ✅ v2.1_CORRECTED: Generate completion message from JSON format
+        pronoun = state.greeting if state.greeting else "Bạn"
+        pronoun_lower = pronoun.lower()
+        
+        # Try to load completion message format from JSON
+        completion_format = None
+        if 'completion_message' in self.questions_data:
+            completion_format = self.questions_data['completion_message']
+        
+        # Build message according to JSON format
+        if completion_format:
+            # Greeting
+            greeting_msg = self._replace_greeting(completion_format.get('greeting', ''), pronoun)
+            summary_intro = self._replace_greeting(completion_format.get('summary_intro', ''), pronoun)
+            message = f"{greeting_msg}\n\n{summary_intro}\n\n"
+        else:
+            # Fallback
+            message = (
+                f"🎉 Chúc mừng {pronoun_lower}! Chúng ta đã hoàn thành bài kiểm tra rồi!\n\n"
+                f"Đây là kết quả của {pronoun_lower} nhé:\n\n"
+            )
+        
+        # Score format
+        score_format = completion_format.get('score_format', {}) if completion_format else {}
+        raw_score = adjusted_score_result.raw_score if adjusted_score_result else (state.total_score or 0)
+        adjusted_score = adjusted_score_result.adjusted_score if adjusted_score_result else raw_score
+        
+        # Get risk level label
+        risk_level = state.mci_result.get('risk_level', 'on') if state.mci_result else 'on'
+        risk_level_labels = {
+            'on': "✅ Ổn (Normal/Healthy Aging)",
+            'nguy_co_nhe': "⚠️ Nguy cơ nhẹ (Mild Risk/Possible MCI)",
+            'nguy_co_cao': "🚨 Nguy cơ cao (High Risk/Probable MCI or Dementia)"
+        }
+        risk_level_label = risk_level_labels.get(risk_level, classification)
+        
+        # Total score
+        total_score_msg = score_format.get('total', '**Tổng điểm MMSE:** {total_score}/35 điểm')
+        message += total_score_msg.replace('{total_score}', f"{raw_score:.1f}")
+        message += "\n"
+        
+        # Adjusted score
+        if adjusted_score_result:
+            adjusted_msg = score_format.get('adjusted', '**Điểm sau điều chỉnh:** {adjusted_score} điểm (điều chỉnh theo tuổi và học vấn)')
+            adjusted_msg = adjusted_msg.replace('{adjusted_score}', f"{adjusted_score:.1f}")
+            age = int(state.user_info.get('age', 65))
+            education_years = int(state.user_info.get('education_years', 12))
+            adjusted_msg = adjusted_msg.replace('{age}', str(age))
+            adjusted_msg = adjusted_msg.replace('{education_years}', str(education_years))
+            message += adjusted_msg + "\n"
+        
+        # Classification
+        classification_msg = score_format.get('classification', '**Phân loại:** {risk_level}')
+        message += classification_msg.replace('{risk_level}', risk_level_label)
+        message += "\n\n"
+        
+        # Domain breakdown
+        domain_breakdown = completion_format.get('domain_breakdown', {}) if completion_format else {}
+        domain_title = domain_breakdown.get('title', '**Chi tiết từng phần:**')
+        message += f"{domain_title}\n"
         
         domain_names = {
             "orientation": "Định hướng",
             "registration": "Ghi nhận",
             "attention_calculation": "Chú ý & Tính toán",
+            "executive_function": "Chức năng điều hành",  # ✅ v2.1: Added
             "recall": "Nhớ lại",
             "language": "Ngôn ngữ",
             "visuospatial": "Hình dung không gian"
         }
         
+        # ✅ v2.1_CORRECTED: Domain max points (35-point scale)
         domain_max = {
             "orientation": 10,
             "registration": 3,
             "attention_calculation": 5,
+            "executive_function": 3,  # ✅ v2.1: Added
             "recall": 3,
             "language": 8,
-            "visuospatial": 1
+            "visuospatial": 3
         }
         
+        domain_format = domain_breakdown.get('format', '• {domain_name}: {score}/{max_points} điểm')
         for domain, score in state.domain_scores.items():
             name = domain_names.get(domain, domain)
             max_score = domain_max.get(domain, 1)
-            message += f"• {name}: {score}/{max_score} điểm\n"
+            domain_line = domain_format.replace('{domain_name}', name)
+            domain_line = domain_line.replace('{score}', str(score))
+            domain_line = domain_line.replace('{max_points}', str(max_score))
+            message += domain_line + "\n"
         
-        # Add MCI multimodal analysis if available
+        # ✅ v2.1: Multimodal analysis
         if state.mci_result:
-            message += f"\n**🧬 Phân tích đa phương thức (Multimodal Analysis):**\n"
-            message += f"• Đặc trưng âm thanh: {state.mci_result['acoustic_feature_count']} features\n"
-            message += f"• Đặc trưng ngôn ngữ: {state.mci_result['linguistic_feature_count']} features\n"
-            message += f"• Ước tính nguy cơ MCI: **{state.mci_result['mci_probability']:.1%}**\n"
+            multimodal = completion_format.get('multimodal_analysis', {}) if completion_format else {}
+            multimodal_title = multimodal.get('title', '**🧬 Phân tích đa phương thức (Multimodal Analysis):**')
+            message += f"\n{multimodal_title}\n"
+            
+            # Acoustic features
+            acoustic_msg = multimodal.get('acoustic', '• Đặc trưng âm thanh: {acoustic_feature_count} features')
+            acoustic_count = state.mci_result.get('acoustic_feature_count', 0)
+            message += acoustic_msg.replace('{acoustic_feature_count}', str(acoustic_count)) + "\n"
+            
+            # Linguistic features
+            linguistic_msg = multimodal.get('linguistic', '• Đặc trưng ngôn ngữ: {linguistic_feature_count} features')
+            linguistic_count = state.mci_result.get('linguistic_feature_count', 0)
+            message += linguistic_msg.replace('{linguistic_feature_count}', str(linguistic_count)) + "\n"
+            
+            # Combined risk score
+            if 'combined_risk_score' in state.mci_result:
+                combined_risk = state.mci_result['combined_risk_score']
+                mci_risk_msg = multimodal.get('mci_risk', '• Ước tính nguy cơ MCI: **{mci_probability}%**')
+                message += mci_risk_msg.replace('{mci_probability}', f"{combined_risk * 100:.1f}") + "\n"
+                
+                # Risk components
+                if 'risk_components' in state.mci_result:
+                    components = state.mci_result['risk_components']
+                    message += f"• Điểm MMSE đóng góp: {(components.get('mmse', 0) * 100):.1f}%\n"
+                    message += f"• Đặc trưng âm thanh: {(components.get('acoustic', 0) * 100):.1f}%\n"
+                    message += f"• Đặc trưng ngôn ngữ: {(components.get('linguistic', 0) * 100):.1f}%\n"
+                    message += f"• **Nguy cơ tổng hợp: {(combined_risk * 100):.1f}%**\n"
+            
+            # Interpretation
             if 'interpretation' in state.mci_result:
-                message += f"• Diễn giải: {state.mci_result['interpretation']}\n"
-
-        message += f"\n💝 Cảm ơn {greeting_term} đã tham gia bài kiểm tra!\n"
-        message += "Kết quả này sẽ giúp bác sĩ đánh giá tình trạng sức khỏe của bạn tốt hơn."
+                interpretation_msg = multimodal.get('interpretation', '• Diễn giải: {risk_interpretation}')
+                interpretation = state.mci_result['interpretation']
+                message += interpretation_msg.replace('{risk_interpretation}', interpretation) + "\n"
         
+        # ✅ v2.1: Recommendations based on risk level
+        recommendations = completion_format.get('recommendations', {}) if completion_format else {}
+        if risk_level in recommendations:
+            rec_data = recommendations[risk_level]
+            rec_title = self._replace_greeting(rec_data.get('title', ''), pronoun)
+            rec_message = self._replace_greeting(rec_data.get('message', ''), pronoun)
+            message += f"\n{rec_title}\n{rec_message}\n"
+        
+        # ✅ v2.1: Add doctor-style SHAP explanation if available
+        if state.mci_result and state.mci_result.get('risk_components'):
+            try:
+                from modules.doctor_style_explanation import generate_doctor_style_explanation
+                
+                # Prepare SHAP values from risk components
+                shap_values = {}
+                risk_components = state.mci_result.get('risk_components', {})
+                
+                # Convert risk components to SHAP-like format
+                for component_name, component_value in risk_components.items():
+                    # Map component names to feature names
+                    feature_map = {
+                        'mmse': 'mmse_adjusted_score',
+                        'acoustic': 'pause_ratio',  # Representative acoustic feature
+                        'linguistic': 'TTR'  # Representative linguistic feature
+                    }
+                    feature_name = feature_map.get(component_name, component_name)
+                    shap_values[feature_name] = {'value': component_value}
+                
+                # Add domain-specific SHAP values if available
+                if state.domain_scores:
+                    for domain, score in state.domain_scores.items():
+                        domain_max = {
+                            "orientation": 10,
+                            "registration": 3,
+                            "attention_calculation": 5,
+                            "executive_function": 3,
+                            "recall": 3,
+                            "language": 8,
+                            "visuospatial": 3
+                        }
+                        max_score = domain_max.get(domain, 1)
+                        normalized_score = score / max_score if max_score > 0 else 0
+                        # Lower score = higher risk (positive SHAP)
+                        shap_value = 1.0 - normalized_score
+                        shap_values[f'mmse_{domain}'] = {'value': shap_value}
+                
+                # Generate doctor-style explanation
+                doctor_explanation = generate_doctor_style_explanation(
+                    shap_values=shap_values,
+                    multimodal_result=state.mci_result,
+                    user_info=state.user_info
+                )
+                
+                message += doctor_explanation
+                
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to generate doctor-style explanation: {e}")
+                import traceback
+                traceback.print_exc()
+        
+        # Closing
+        closing = completion_format.get('closing', '') if completion_format else ''
+        if closing:
+            message += f"\n{self._replace_greeting(closing, pronoun)}"
+        else:
+            message += f"\n💝 Cảm ơn {pronoun_lower} đã tham gia bài kiểm tra!\n"
+            message += f"Kết quả này sẽ giúp bác sĩ đánh giá tình trạng sức khỏe của {pronoun_lower} tốt hơn."
+        
+        # ✅ v2.1: Enhanced metadata with all results
         metadata = {
             "completed": True,
             "total_score": state.total_score,
+            "raw_score": raw_score,
+            "adjusted_score": adjusted_score if adjusted_score_result else None,
             "domain_scores": state.domain_scores,
             "classification": classification,
-            "session_id": session_id
+            "risk_level": risk_level,
+            "risk_level_label": risk_level_label,
+            "session_id": session_id,
+            "mci_result": state.mci_result,
+            "adjusted_score_result": {
+                "raw_score": adjusted_score_result.raw_score if adjusted_score_result else None,
+                "age_penalty": adjusted_score_result.age_penalty if adjusted_score_result else None,
+                "education_bonus": adjusted_score_result.education_bonus if adjusted_score_result else None,
+                "adjusted_score": adjusted_score_result.adjusted_score if adjusted_score_result else None,
+                "education_group": adjusted_score_result.education_group if adjusted_score_result else None
+            } if adjusted_score_result else None
         }
         
         return message, metadata
@@ -678,34 +1049,37 @@ class MMSEChatbotService:
         This function aggregates them by domain
         """
         
-        # ✅ FIX: Use rule-based scores already calculated
+        # ✅ v2.1_CORRECTED: Use rule-based scores already calculated
         if hasattr(state, 'question_scores') and state.question_scores:
-            # Aggregate scores by domain
+            # Aggregate scores by domain (35-point scale)
             state.domain_scores = {
                 "orientation": 0,
                 "registration": 0,
                 "attention_calculation": 0,
                 "recall": 0,
                 "language": 0,
-                "visuospatial": 0
+                "visuospatial": 0,
+                "executive_function": 0  # ✅ v2.1: Added executive function domain
             }
             
-            # Map question IDs to domains
+            # Map question IDs to domains (v2.1_CORRECTED structure)
             for q_id, score in state.question_scores.items():
                 if q_id.startswith('ori_'):
                     state.domain_scores["orientation"] += score
                 elif q_id.startswith('reg_'):
                     state.domain_scores["registration"] += score
-                elif q_id.startswith('attn_'):
+                elif q_id.startswith('attn_') or q_id.startswith('att_'):
                     state.domain_scores["attention_calculation"] += score
                 elif q_id.startswith('recall_'):
                     state.domain_scores["recall"] += score
-                elif q_id.startswith('lang_') or q_id.startswith('name_') or q_id.startswith('rep_') or q_id.startswith('flu_'):
+                elif q_id.startswith('lang_') or q_id.startswith('name_') or q_id.startswith('rep_'):
                     state.domain_scores["language"] += score
-                elif q_id.startswith('vis_') or q_id.startswith('draw_'):
+                elif q_id.startswith('vis_') or q_id.startswith('draw_') or q_id.startswith('visual_'):
                     state.domain_scores["visuospatial"] += score
+                elif q_id.startswith('exec_') or q_id.startswith('flu_'):
+                    state.domain_scores["executive_function"] += score
             
-            # Calculate total from question scores
+            # Calculate total from question scores (should be 0-35)
             state.total_score = sum(state.question_scores.values())
         else:
             # Fallback: calculate from responses if scoring service not available
@@ -716,14 +1090,15 @@ class MMSEChatbotService:
                 "attention_calculation": 0,
                 "recall": 0,
                 "language": 0,
-                "visuospatial": 0
+                "visuospatial": 0,
+                "executive_function": 0  # ✅ v2.1: Added executive function
             }
             state.total_score = 0
         
         # Extract linguistic features from all responses
         state.linguistic_features = self._extract_linguistic_features(state)
         
-        logger.info(f"✅ Scores calculated (rule-based): Total={state.total_score}/30")
+        logger.info(f"✅ Scores calculated (rule-based v2.1): Total={state.total_score}/35")
     
     def _extract_linguistic_features(self, state: SessionState) -> Dict[str, float]:
         """
@@ -1231,8 +1606,57 @@ Trả về JSON với format:
         else:
             return "Nguy cơ rất cao (Very high risk) - Cần khám chuyên khoa ngay"
     
+    def _interpret_risk_level_v21(self, risk_level: str) -> str:
+        """
+        Interpret v2.1 risk level as clinical description
+        
+        Args:
+            risk_level: 'on', 'nguy_co_nhe', or 'nguy_co_cao'
+        
+        Returns:
+            str: Risk interpretation in Vietnamese
+        """
+        interpretations = {
+            'on': 'Ổn - Chức năng nhận thức bình thường',
+            'nguy_co_nhe': 'Nguy cơ nhẹ - Nên theo dõi định kỳ và tái khám',
+            'nguy_co_cao': 'Nguy cơ cao - Khuyến nghị khám chuyên khoa sớm'
+        }
+        return interpretations.get(risk_level, 'Không xác định')
+    
     def _get_domain_questions(self, domain: str) -> List[Dict]:
-        """Get questions for a domain"""
+        """Get questions for a domain (v2.1_CORRECTED structure)"""
+        # ✅ v2.1_CORRECTED: New JSON structure uses "questions" key with domain keys
+        if 'questions' in self.questions_data:
+            # New v2.1 structure
+            questions_data = self.questions_data.get('questions', {})
+            
+            domain_mapping = {
+                "orientation": "1_orientation",
+                "registration": "2_registration",
+                "attention_calculation": "3_attention_calculation",
+                "open_questions": "5_open_questions",
+                "recall": "6_recall",
+                "language": "7_language",
+                "visuospatial": "8_visuospatial",
+                "executive_function": "4_executive_function"  # ✅ v2.1: Added executive function
+            }
+            
+            domain_key = domain_mapping.get(domain)
+            if domain_key and domain_key in questions_data:
+                domain_obj = questions_data[domain_key]
+                questions = domain_obj.get('questions', {})
+                
+                # Convert dict to list format expected by code
+                question_list = []
+                for q_id, q_data in questions.items():
+                    q_item = q_data.copy()
+                    q_item['question_id'] = q_id
+                    question_list.append(q_item)
+                
+                logger.debug(f"✅ Loaded {len(question_list)} questions from v2.1 structure for domain {domain}")
+                return question_list
+        
+        # Fallback: Old structure (v2.0)
         domain_mapping = {
             "orientation": "ORIENTATION",
             "registration": "REGISTRATION",
@@ -1240,12 +1664,12 @@ Trả về JSON với format:
             "recall": "RECALL",
             "language": "LANGUAGE",
             "visuospatial": "VISUOSPATIAL",
-            "open_questions": "SUPPLEMENTARY_OPEN_QUESTIONS"  # Supplementary
+            "open_questions": "SUPPLEMENTARY_OPEN_QUESTIONS"
         }
         
         domain_code = domain_mapping.get(domain)
         
-        # ✅ FIX: Load from correct JSON structure
+        # Old structure fallback
         mmse_data = self.questions_data.get('mmse_vietnamese_chatbot', {})
         domains = mmse_data.get('domains', [])
         
@@ -1289,11 +1713,23 @@ Trả về JSON với format:
         return []
     
     def _replace_greeting(self, text: str, greeting: str) -> str:
-        """Replace {greeting} placeholder"""
-        return text.replace("{greeting}", greeting)
+        """
+        ✅ v2.1_CORRECTED: Replace pronoun placeholders
+        
+        Supports:
+        - {pronoun} → lowercase (ông/bà)
+        - {Pronoun} → capitalized (Ông/Bà)
+        - {greeting} → legacy support
+        """
+        # v2.1 uses {pronoun} and {Pronoun}
+        text = text.replace("{pronoun}", greeting.lower() if greeting else "bạn")
+        text = text.replace("{Pronoun}", greeting if greeting else "Bạn")
+        # Legacy support
+        text = text.replace("{greeting}", greeting if greeting else "Bạn")
+        return text
     
     def _check_recall_allowed(self, state: SessionState) -> bool:
-        """Check if 5-minute delay has passed for recall"""
+        """✅ v2.1_CORRECTED: Check if 6-minute (360 seconds) delay has passed for recall"""
         if not state.recall_allowed_after:
             return True  # No registration done yet
         
@@ -1301,7 +1737,7 @@ Trả về JSON với format:
         return datetime.now() >= allowed_time
     
     def _get_recall_wait_time(self, state: SessionState) -> int:
-        """Get remaining seconds until recall is allowed"""
+        """✅ v2.1_CORRECTED: Get remaining seconds until recall is allowed (minimum 360 seconds)"""
         if not state.recall_allowed_after:
             return 0
         

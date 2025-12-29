@@ -50,8 +50,10 @@ interface CognitiveRow {
   completedAt: string;
   finalMmseScore: number;
   overallGptScore: number;
-  questionResults: any[];
+  questionResults: any[] | any; // Can be array or object
   cognitiveAnalysis?: any;
+  assessmentType?: string; // Added missing property
+  audioFeatures?: any; // Added missing property
   status: string;
   totalQuestions: number;
   answeredQuestions: number;
@@ -787,15 +789,25 @@ function StatsContent({
                     </div>
                   )}
                   
-                  <div className="ml-auto">
+                  <div className="ml-auto flex gap-2">
                     <Link href={`/results/${encodeURIComponent(row.sessionId)}`}>
-                      <button className="px-8 py-4 rounded-2xl font-bold text-lg transition-all duration-300 hover:scale-105 shadow-lg"
+                      <button className="px-6 py-4 rounded-2xl font-bold text-lg transition-all duration-300 hover:scale-105 shadow-lg"
                         style={{
                           background: 'linear-gradient(135deg, #F4A261 0%, #E88D4D 100%)',
                           color: '#FFFFFF',
                           border: '2px solid #E67635'
                         }}>
                         Xem Chi tiết
+                      </button>
+                    </Link>
+                    <Link href={`/features/${encodeURIComponent(row.sessionId)}`}>
+                      <button className="px-6 py-4 rounded-2xl font-bold text-lg transition-all duration-300 hover:scale-105 shadow-lg"
+                        style={{
+                          background: 'linear-gradient(135deg, #3B82F6 0%, #2563EB 100%)',
+                          color: '#FFFFFF',
+                          border: '2px solid #1E40AF'
+                        }}>
+                        Features
                       </button>
                     </Link>
                   </div>

@@ -19,19 +19,20 @@ from typing import Dict, List, Optional, Any, Tuple
 logger = logging.getLogger(__name__)
 
 # Optional imports with graceful fallback
+# NOTE: Using PhoNLP + VnCoreNLP + PhoBERT pipeline
 try:
-    from vncorenlp import VnCoreNLP
+    import phonlp
+    PHONLP_AVAILABLE = True
+except ImportError:
+    PHONLP_AVAILABLE = False
+    logger.warning("phonlp not available. Vietnamese NLP will be limited.")
+
+try:
+    import py_vncorenlp
     VNCORENLP_AVAILABLE = True
 except ImportError:
     VNCORENLP_AVAILABLE = False
-    logger.warning("VnCoreNLP not available. Using underthesea fallback.")
-
-try:
-    import underthesea
-    UNDERTHESEA_AVAILABLE = True
-except ImportError:
-    UNDERTHESEA_AVAILABLE = False
-    logger.warning("underthesea not available. Vietnamese NLP will be limited.")
+    logger.warning("py_vncorenlp not available. Word segmentation will be limited.")
 
 try:
     from transformers import AutoTokenizer, AutoModel
@@ -67,20 +68,21 @@ class VietnameseLinguisticAnalyzer:
     - Reduced semantic coherence
     """
     
-    # Vietnamese POS tags (VnCoreNLP format)
+    # Vietnamese POS tags (underthesea format)
+    # underthesea uses Universal Dependencies tags: NOUN, VERB, ADJ, ADV, PRON, DET, NUM, ADP, CONJ, PART, INTJ
     POS_CATEGORIES = {
-        'NOUN': ['N', 'Np', 'Nc', 'Nu', 'Ny'],  # Nouns
-        'VERB': ['V'],                           # Verbs
-        'ADJ': ['A'],                            # Adjectives
-        'ADV': ['R'],                            # Adverbs
-        'PRON': ['P'],                           # Pronouns
-        'DET': ['L'],                            # Determiners
-        'NUM': ['M'],                            # Numbers
-        'PREP': ['E'],                           # Prepositions
-        'CONJ': ['C', 'CC'],                     # Conjunctions
-        'PART': ['T'],                           # Particles
-        'INTERJ': ['I'],                         # Interjections
-        'CLASSIFIER': ['Nc'],                    # Classifiers (subset of NOUN)
+        'NOUN': ['NOUN', 'N', 'Np', 'Nc', 'Nu', 'Ny'],  # Nouns (including VnCoreNLP format for compatibility)
+        'VERB': ['VERB', 'V'],                           # Verbs
+        'ADJ': ['ADJ', 'A'],                            # Adjectives
+        'ADV': ['ADV', 'R'],                            # Adverbs
+        'PRON': ['PRON', 'P'],                           # Pronouns
+        'DET': ['DET', 'L'],                            # Determiners
+        'NUM': ['NUM', 'M'],                            # Numbers
+        'PREP': ['ADP', 'E'],                           # Prepositions (ADP in UD)
+        'CONJ': ['CONJ', 'CCONJ', 'SCONJ', 'C', 'CC'], # Conjunctions
+        'PART': ['PART', 'T'],                           # Particles
+        'INTERJ': ['INTJ', 'I'],                         # Interjections
+        'CLASSIFIER': ['Nc', 'L'],                       # Classifiers (can be Nc or L in underthesea)
     }
     
     # Vietnamese tense markers
@@ -89,29 +91,18 @@ class VietnameseLinguisticAnalyzer:
     # Aspect markers
     ASPECT_MARKERS = ['xong', 'được', 'hết', 'mất', 'ra', 'vào', 'lên', 'xuống']
     
-    def __init__(self, vncorenlp_path: Optional[str] = None, use_phobert: bool = True):
+    def __init__(self, use_phobert: bool = True):
         """
         Initialize Vietnamese Linguistic Analyzer
         
+        Uses underthesea for tokenization/POS tagging and PhoBERT for semantic analysis.
+        VnCoreNLP is no longer used.
+        
         Args:
-            vncorenlp_path: Path to VnCoreNLP installation (optional)
             use_phobert: Whether to use PhoBERT for semantic analysis
         """
-        self.annotator = None
         self.phobert_tokenizer = None
         self.phobert_model = None
-        
-        # Initialize VnCoreNLP
-        if VNCORENLP_AVAILABLE and vncorenlp_path:
-            try:
-                self.annotator = VnCoreNLP(
-                    vncorenlp_path, 
-                    annotators="wseg,pos,ner,parse", 
-                    max_heap_size='-Xmx2g'
-                )
-                logger.info("✅ VnCoreNLP initialized")
-            except Exception as e:
-                logger.warning(f"VnCoreNLP initialization failed: {e}")
         
         # Initialize PhoBERT for semantic analysis
         if use_phobert and TRANSFORMERS_AVAILABLE:
@@ -123,11 +114,14 @@ class VietnameseLinguisticAnalyzer:
             except Exception as e:
                 logger.warning(f"PhoBERT initialization failed: {e}")
         
-        logger.info("VietnameseLinguisticAnalyzer initialized")
+        if not UNDERTHESEA_AVAILABLE:
+            logger.warning("⚠️ underthesea not available. Tokenization/POS tagging will be limited.")
+        
+        logger.info("VietnameseLinguisticAnalyzer initialized (using underthesea + PhoBERT)")
     
     def tokenize(self, text: str) -> List[str]:
         """
-        Tokenize Vietnamese text
+        Tokenize Vietnamese text using underthesea
         
         Args:
             text: Raw Vietnamese text
@@ -138,25 +132,18 @@ class VietnameseLinguisticAnalyzer:
         if not text or not text.strip():
             return []
         
-        if self.annotator:
-            try:
-                annotated = self.annotator.annotate(text)
-                tokens = []
-                for sentence in annotated.get('sentences', []):
-                    tokens.extend([word['form'] for word in sentence])
-                return tokens
-            except Exception as e:
-                logger.warning(f"VnCoreNLP tokenization failed: {e}")
-        
         if UNDERTHESEA_AVAILABLE:
-            return underthesea.word_tokenize(text)
+            try:
+                return underthesea.word_tokenize(text)
+            except Exception as e:
+                logger.warning(f"underthesea tokenization failed: {e}")
         
         # Fallback: simple whitespace tokenization
         return text.split()
     
     def pos_tag(self, text: str) -> List[Tuple[str, str]]:
         """
-        POS tagging for Vietnamese
+        POS tagging for Vietnamese using underthesea
         
         Args:
             text: Vietnamese text
@@ -167,18 +154,12 @@ class VietnameseLinguisticAnalyzer:
         if not text or not text.strip():
             return []
         
-        if self.annotator:
-            try:
-                annotated = self.annotator.annotate(text)
-                pos_tags = []
-                for sentence in annotated.get('sentences', []):
-                    pos_tags.extend([(word['form'], word['posTag']) for word in sentence])
-                return pos_tags
-            except Exception as e:
-                logger.warning(f"VnCoreNLP POS tagging failed: {e}")
-        
         if UNDERTHESEA_AVAILABLE:
-            return underthesea.pos_tag(text)
+            try:
+                # underthesea.pos_tag returns list of tuples
+                return underthesea.pos_tag(text)
+            except Exception as e:
+                logger.warning(f"underthesea POS tagging failed: {e}")
         
         # Fallback: no POS tags
         tokens = text.split()
@@ -268,8 +249,9 @@ class VietnameseLinguisticAnalyzer:
         adjectives = sum(pos_counts.get(p, 0) for p in self.POS_CATEGORIES.get('ADJ', []))
         adj_ratio = adjectives / total_words
         
-        # Content words (N, V, A, R) vs function words
-        content_pos = ['N', 'Np', 'Nc', 'V', 'A', 'R']
+        # Content words (Nouns, Verbs, Adjectives, Adverbs) vs function words
+        # Support both underthesea (NOUN, VERB, ADJ, ADV) and VnCoreNLP (N, V, A, R) formats
+        content_pos = ['NOUN', 'N', 'Np', 'Nc', 'VERB', 'V', 'ADJ', 'A', 'ADV', 'R']
         content_words = sum(pos_counts.get(p, 0) for p in content_pos)
         content_word_ratio = content_words / total_words
         
@@ -365,18 +347,9 @@ class VietnameseLinguisticAnalyzer:
         std_sentence_length = np.std(sentence_lengths_words)
         incomplete_ratio = incomplete_sentences / len(sentences)
         
-        # Calculate parse tree depth (if VnCoreNLP available)
+        # Parse tree depth calculation removed (required VnCoreNLP)
+        # Using clause density as alternative complexity measure
         mean_parse_depth = 0.0
-        if self.annotator:
-            try:
-                annotated = self.annotator.annotate(transcript)
-                parse_depths = []
-                for sentence in annotated.get('sentences', []):
-                    depth = self._calculate_parse_depth(sentence)
-                    parse_depths.append(depth)
-                mean_parse_depth = np.mean(parse_depths) if parse_depths else 0.0
-            except Exception as e:
-                logger.warning(f"Parse depth calculation failed: {e}")
         
         # Clause indicators (conjunctions, relative markers)
         tokens = self.tokenize(transcript)
@@ -467,8 +440,10 @@ class VietnameseLinguisticAnalyzer:
         tokens = self.tokenize(transcript)
         pos_tags = self.pos_tag(transcript)
         
-        content_pos = ['N', 'Np', 'Nc', 'V', 'A']
-        propositions = sum(1 for word, pos in pos_tags if any(pos.startswith(p) for p in content_pos))
+        # Support both underthesea (NOUN, VERB, ADJ) and VnCoreNLP (N, V, A) formats
+        content_pos = ['NOUN', 'N', 'Np', 'Nc', 'VERB', 'V', 'ADJ', 'A']
+        propositions = sum(1 for word, pos in pos_tags 
+                         if any(pos == p or pos.startswith(p) for p in content_pos))
         
         # Propositions per 10 words
         idea_density = (propositions / len(tokens)) * 10 if len(tokens) > 0 else 0
@@ -576,9 +551,12 @@ class VietnameseLinguisticAnalyzer:
         
         total_words = len(tokens)
         
-        # 1. Classifiers (Nc in VnCoreNLP)
+        # 1. Classifiers (using underthesea POS tags)
         # Common classifiers: cái, con, chiếc, quyển, tờ, bức
-        classifiers = [word for word, pos in pos_tags if pos == 'Nc']
+        # underthesea uses 'L' for classifiers/determiners, or we can check by word
+        classifier_words = ['cái', 'con', 'chiếc', 'quyển', 'tờ', 'bức', 'người', 'cây', 'bông', 'viên']
+        classifiers = [word for word, pos in pos_tags 
+                      if pos == 'L' or word.lower() in classifier_words]
         classifier_count = len(classifiers)
         classifier_ratio = classifier_count / total_words
         

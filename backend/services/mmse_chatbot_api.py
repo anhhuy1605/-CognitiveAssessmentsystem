@@ -166,14 +166,91 @@ def submit_answer():
             audio_path = os.path.join(temp_dir, filename)
             audio_file.save(audio_path)
             
+            # ✅ FIX: Validate audio file was saved correctly
+            if not os.path.exists(audio_path):
+                logger.error(f"❌ Audio file not saved: {audio_path}")
+                return jsonify({
+                    'success': False,
+                    'error': 'Failed to save audio file'
+                }), 500
+            
+            file_size = os.path.getsize(audio_path)
+            logger.info(f"📁 Audio file saved: {audio_path}, size: {file_size} bytes")
+            
+            if file_size == 0:
+                logger.error(f"❌ Audio file is empty: {audio_path}")
+                return jsonify({
+                    'success': False,
+                    'error': 'Audio file is empty'
+                }), 500
+            
+            # ✅ FIX: Preprocess audio (webm → wav) before transcription
+            processed_audio_path = audio_path
+            try:
+                from modules.audio_preprocessor import preprocess_audio_for_analysis
+                processed_audio_path = preprocess_audio_for_analysis(audio_path)
+                logger.info(f"✅ Audio preprocessed: {audio_path} → {processed_audio_path}")
+            except Exception as e:
+                logger.warning(f"⚠️ Audio preprocessing failed, using original: {e}")
+                processed_audio_path = audio_path
+            
             # Transcribe if no text answer provided
             if not answer and transcriber:
                 try:
-                    result = transcriber.transcribe_audio_file(audio_path)
+                    # ✅ FIX: Get current question context for better transcription
+                    current_question = ""
+                    if chatbot_service:
+                        state = chatbot_service.get_session(session_id)
+                        if state:
+                            question_text, _ = chatbot_service.get_current_question(session_id)
+                            current_question = question_text
+                    
+                    logger.info(f"🎤 Transcribing audio: {processed_audio_path}")
+                    logger.info(f"📋 Question context: {current_question[:100] if current_question else 'None'}...")
+                    
+                    # ✅ FIX: Use processed audio with language and question context
+                    result = transcriber.transcribe_audio_file(
+                        processed_audio_path,
+                        language='vi',
+                        use_vietnamese_asr=True,
+                        question=current_question
+                    )
+                    
+                    logger.info(f"📊 Transcription result: success={result.get('success')}, transcript_length={len(result.get('transcript', ''))}")
+                    
                     if result.get('success'):
-                        answer = result.get('transcript', '')
+                        answer = result.get('transcript', '').strip()
+                        # ✅ FIX: Check if transcript is actually empty or just "Không có lời thoại"
+                        if not answer or answer == 'Không có lời thoại':
+                            logger.warning(f"⚠️ Transcription returned empty or no speech: '{answer}'")
+                            # Try to get original text if available
+                            original_text = result.get('original_text', '')
+                            if original_text and original_text.strip():
+                                answer = original_text.strip()
+                                logger.info(f"✅ Using original transcript: '{answer[:100]}...'")
+                            else:
+                                logger.warning("⚠️ No transcript available, will use empty string")
+                        else:
+                            logger.info(f"✅ Transcription successful: '{answer[:100]}...'")
+                    else:
+                        error_msg = result.get('error', 'Unknown error')
+                        logger.error(f"❌ Transcription failed: {error_msg}")
+                        # Check if it's a quota/rate limit error
+                        if 'quota' in str(error_msg).lower() or '429' in str(error_msg) or 'rate limit' in str(error_msg).lower():
+                            logger.error(f"🚨 Gemini quota/rate limit exceeded. Error: {error_msg}")
+                            # Try to use original text if available
+                            original_text = result.get('original_text', '')
+                            if original_text and original_text.strip():
+                                answer = original_text.strip()
+                                logger.info(f"✅ Using fallback original transcript: '{answer[:100]}...'")
                 except Exception as e:
-                    logger.warning(f"Transcription failed: {e}")
+                    logger.error(f"❌ Transcription exception: {e}", exc_info=True)
+                    # Check if it's a quota error
+                    if 'quota' in str(e).lower() or '429' in str(e) or 'rate limit' in str(e).lower():
+                        logger.error(f"🚨 Gemini quota/rate limit error detected: {e}")
+            
+            # Use processed audio path for further processing
+            audio_path = processed_audio_path
         
         if chatbot_service:
             # Check if session exists, create if not

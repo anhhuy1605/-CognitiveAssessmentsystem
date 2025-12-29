@@ -142,7 +142,6 @@ class MCIScreeningPipeline:
     def __init__(self, 
                  asr_module=None,
                  model_path: Optional[str] = None,
-                 vncorenlp_path: Optional[str] = None,
                  use_phobert: bool = True):
         """
         Initialize MCI Screening Pipeline
@@ -150,7 +149,6 @@ class MCIScreeningPipeline:
         Args:
             asr_module: Your existing ASR module
             model_path: Path to trained fusion model (optional)
-            vncorenlp_path: Path to VnCoreNLP installation (optional)
             use_phobert: Whether to use PhoBERT for semantic analysis
         """
         if not MODULES_AVAILABLE:
@@ -159,7 +157,6 @@ class MCIScreeningPipeline:
         self.asr = ASRInterface(asr_module)
         self.acoustic_analyzer = AcousticAnalyzer()
         self.linguistic_analyzer = VietnameseLinguisticAnalyzer(
-            vncorenlp_path=vncorenlp_path,
             use_phobert=use_phobert
         )
         self.fusion_model = MultimodalFusion(FusionConfig(

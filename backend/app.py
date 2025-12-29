@@ -616,7 +616,12 @@ def load_environment():
 load_environment()
 
 # Configure API clients (Gemini first)
+# ✅ Note: API key is reloaded from config.env on each transcription request
 gemini_api_key = os.getenv('GEMINI_API_KEY')
+if gemini_api_key:
+    logger.info(f"✅ Gemini API key loaded: {gemini_api_key[:10]}...{gemini_api_key[-4:]}")
+else:
+    logger.warning("⚠️ Gemini API key not found in environment")
 vi_asr_model = os.getenv('VI_ASR_MODEL', 'nguyenvulebinh/wav2vec2-large-vietnamese-250h')
 
 openai_api_key = os.getenv('OPENAI_API_KEY')
@@ -4201,159 +4206,173 @@ def auto_transcribe_alias():
 
         try:
             logger.info("=" * 60)
-            logger.info("PIPELINE XỬ LÝ ĐÁNH GIÁ NHẬN THỨC")
+            logger.info("PIPELINE XỬ LÝ ĐÁNH GIÁ NHẬN THỨC (MODULES ONLY)")
             logger.info("=" * 60)
             logger.info(f"📋 Câu hỏi: {question[:100]}...")
             logger.info(f"🌐 Ngôn ngữ: {language}")
             
-            # TẦNG 1 - Bước 1: Audio → Transcript (xử lý transcript từ audio)
-            logger.info("📝 TẦNG 1 - Bước 1: Xử lý audio thành transcript...")
+            # Bước 1: Audio → Transcript (chỉ giữ transcription cơ bản)
+            logger.info("📝 Bước 1: Xử lý audio thành transcript...")
             if vietnamese_transcriber:
-                # Use Vietnamese-specific transcription for better accuracy when Vietnamese is selected
                 target_lang = 'vi' if language == 'vi' else 'en'
                 transcription_result = vietnamese_transcriber.transcribe_audio_file(
-                    processed_path,
-                    target_lang,
-                    False,
-                    question
+                    processed_path, target_lang, False, question
                 )
             else:
                 transcription_result = transcribe_audio(processed_path, question)
             
-            # Check if transcription was successful
-            if not transcription_result.get('success', False):
-                # Only fallback if we truly have no transcript
-                transcript_content = transcription_result.get('transcript', '').strip()
-                if not transcript_content:
-                    logger.warning("⚠️ Transcription unavailable, using safe empty transcript fallback (raw)")
-                    transcription_result = {
-                        'success': True,
-                        'transcript': 'Không có lời thoại',
-                        'confidence': 0.0,
-                        'model': 'fallback_empty'
-                    }
-                else:
-                    # Keep the transcript even if success=False, but mark as low confidence
-                    logger.warning(f"⚠️ Transcription marked as failed but has content: '{transcript_content[:50]}...'")
-                    transcription_result['success'] = True
-                    transcription_result['confidence'] = min(transcription_result.get('confidence', 0.3), 0.3)
+            transcript_text = transcription_result.get('transcript', '').strip() or 'Không có lời thoại'
+            transcription_result['transcript'] = transcript_text
+            logger.info(f"✅ Transcript: '{transcript_text[:100]}...'")
             
-            # Ensure transcript/confidence safe
-            if not transcription_result.get('transcript') or str(transcription_result.get('transcript')).strip() == '':
-                transcription_result['transcript'] = 'Không có lời thoại'
-            tr_conf = transcription_result.get('confidence', 0)
-            if not isinstance(tr_conf, (int, float)) or np.isnan(tr_conf) or np.isinf(tr_conf):
-                transcription_result['confidence'] = 0.0
+            # Bước 2: Audio → Acoustic Features (sử dụng modules)
+            logger.info("🎵 Bước 2: Trích xuất đặc trưng âm học (modules)...")
+            audio_features = {}
+            if AcousticAnalyzer:
+                try:
+                    analyzer = AcousticAnalyzer()
+                    audio_features = analyzer.extract_all_features(processed_path, transcript=transcript_text)
+                    logger.info(f"✅ Acoustic features extracted: {len(audio_features)} features")
+                    
+                    # ✅ Log chi tiết về F0 contour và các features quan trọng cho SHAP
+                    logger.info("=" * 60)
+                    logger.info("📊 ACOUSTIC FEATURES STRUCTURE (for SHAP analysis)")
+                    logger.info("=" * 60)
+                    
+                    # F0 Contour details
+                    if 'f0_contour' in audio_features:
+                        f0_contour = audio_features['f0_contour']
+                        logger.info(f"📈 F0 Contour: {len(f0_contour.get('f0_values', []))} data points")
+                        logger.info(f"   - Mean: {f0_contour.get('f0_mean', 'N/A')} Hz")
+                        logger.info(f"   - Std: {f0_contour.get('f0_std', 'N/A')} Hz")
+                        logger.info(f"   - Range: {f0_contour.get('f0_range', 'N/A')} Hz")
+                        logger.info(f"   - Voiced frames: {f0_contour.get('voiced_frames', 'N/A')}")
+                        logger.info(f"   - Voiced ratio: {f0_contour.get('voiced_ratio', 'N/A'):.2%}")
+                        logger.info(f"   ✅ F0 contour saved in: audio_features['f0_contour']")
+                    
+                    # Feature categories
+                    egemaps_count = len([k for k in audio_features.keys() if k.startswith('egemaps_')])
+                    f0_count = len([k for k in audio_features.keys() if k.startswith('f0_')])
+                    vq_count = len([k for k in audio_features.keys() if k.startswith('vq_')])
+                    pause_count = len([k for k in audio_features.keys() if k.startswith('pause_')])
+                    tone_count = len([k for k in audio_features.keys() if k.startswith('tone_')])
+                    
+                    logger.info(f"📊 Feature breakdown:")
+                    logger.info(f"   - eGeMAPS: {egemaps_count} features")
+                    logger.info(f"   - F0 metrics: {f0_count} features")
+                    logger.info(f"   - Voice quality: {vq_count} features")
+                    logger.info(f"   - Pause statistics: {pause_count} features")
+                    logger.info(f"   - Tone analysis: {tone_count} features")
+                    logger.info(f"✅ All features saved in: result['audio_features']")
+                    logger.info("=" * 60)
+                    
+                except Exception as e:
+                    logger.warning(f"⚠️ Acoustic feature extraction failed: {e}")
+                    audio_features = {}
+            else:
+                logger.warning("⚠️ AcousticAnalyzer not available")
             
-            transcript_text = transcription_result.get('transcript', '')
-            logger.info(f"✅ Transcript: '{transcript_text[:100]}...' (confidence: {tr_conf:.2f})")
+            # Bước 2b: Transcript → Linguistic Features (sử dụng modules)
+            linguistic_features = {}
+            if VietnameseLinguisticAnalyzer and transcript_text and transcript_text != 'Không có lời thoại':
+                try:
+                    logger.info("📝 Bước 2b: Trích xuất đặc trưng ngôn ngữ (modules)...")
+                    linguistic_analyzer = VietnameseLinguisticAnalyzer()
+                    linguistic_features = linguistic_analyzer.extract_all_features(transcript_text)
+                    logger.info(f"✅ Linguistic features extracted: {len(linguistic_features)} features")
+                    
+                    # Log linguistic features structure
+                    logger.info("=" * 60)
+                    logger.info("📊 LINGUISTIC FEATURES STRUCTURE (for SHAP analysis)")
+                    logger.info("=" * 60)
+                    logger.info(f"   - Lexical features: {len([k for k in linguistic_features.keys() if 'lexical' in k or 'ttr' in k or 'vocab' in k])}")
+                    logger.info(f"   - Syntactic features: {len([k for k in linguistic_features.keys() if 'syntax' in k or 'mlu' in k or 'sentence' in k])}")
+                    logger.info(f"   - Semantic features: {len([k for k in linguistic_features.keys() if 'semantic' in k or 'coherence' in k or 'idea' in k])}")
+                    logger.info(f"✅ All linguistic features saved in: result['linguistic_features']")
+                    logger.info("=" * 60)
+                except Exception as e:
+                    logger.warning(f"⚠️ Linguistic feature extraction failed: {e}")
+                    linguistic_features = {}
             
-            # TẦNG 1 - Bước 2: Audio → Acoustic Features (xử lý đặc trưng âm học)
-            logger.info("🎵 TẦNG 1 - Bước 2: Trích xuất đặc trưng âm học từ audio...")
-            audio_features = extract_audio_features(processed_path)
-            logger.info(f"✅ Acoustic features extracted: {list(audio_features.keys())}")
-            
-            # TẦNG 1 - Bước 3: Acoustic Features → ML Prediction (tầng 1 xử lý âm học)
-            logger.info("🤖 TẦNG 1 - Bước 3: ML model xử lý đặc trưng âm học...")
-            ml_prediction = predict_cognitive_score(audio_features)
-            ml_score = ml_prediction.get('predicted_score', 5.0)
-            logger.info(f"✅ ML prediction: {ml_score:.2f}/30")
-            
-            # TẦNG 1 - Bước 4: Transcript + Question → GPT Evaluation (tầng 1 xử lý transcript)
-            logger.info("💬 TẦNG 1 - Bước 4: GPT đánh giá transcript dựa trên câu hỏi và mức độ đáp ứng...")
-            if not transcript_text or transcript_text.strip() == '':
+            # Bước 3: Transcript → GPT Evaluation (giữ lại)
+            logger.info("💬 Bước 3: GPT đánh giá transcript...")
+            if not transcript_text or transcript_text.strip() == '' or transcript_text == 'Không có lời thoại':
                 logger.warning("⚠️ Empty transcript, skipping GPT evaluation")
                 gpt_evaluation = {
-                    'repetition_rate': 0.0,
-                    'vocabulary_score': 0.0,
-                    'fluency_score': 0.0,
-                    'comprehension_score': 0.0,
-                    'overall_score': 0.0,
-                    'context_relevance_score': 0.0,
-                    'feedback': 'No transcript available for evaluation'
+                    'feedback': 'No transcript available for evaluation',
+                    'analysis': 'No transcript available'
                 }
             else:
                 logger.info(f"🤖 Calling GPT evaluation for transcript: '{transcript_text[:100]}...'")
-                logger.info(f"📋 Evaluating against question: '{question[:100]}...'")
                 gpt_evaluation = evaluate_with_gpt4o(transcript_text, question, language)
                 
-                # Ensure gpt_evaluation is a dictionary
                 if not isinstance(gpt_evaluation, dict):
-                    logger.error(f"❌ [AUTO_TRANSCRIBE_RAW] GPT evaluation returned non-dict: {type(gpt_evaluation)} - {gpt_evaluation}")
-                    gpt_evaluation = {
-                        'vocabulary_score': 5.0,
-                        'context_relevance_score': 5.0,
-                        'overall_score': 5.0,
-                        'analysis': "Đánh giá không khả dụng do lỗi hệ thống",
-                        'feedback': "Đánh giá không khả dụng do lỗi hệ thống"
-                    }
+                    logger.error(f"❌ GPT evaluation returned non-dict: {type(gpt_evaluation)}")
+                    gpt_evaluation = {'feedback': 'Evaluation error', 'analysis': 'Evaluation error'}
                 
-                # Additional safety check before using .get()
-                if isinstance(gpt_evaluation, dict):
-                    logger.info(f"✅ [AUTO_TRANSCRIBE_RAW] GPT evaluation result: analysis={gpt_evaluation.get('analysis', 'MISSING')[:50]}..., feedback={gpt_evaluation.get('feedback', 'MISSING')[:50]}...")
-                    logger.info(f"📊 [AUTO_TRANSCRIBE_RAW] GPT scores: vocab={gpt_evaluation.get('vocabulary_score')}, context={gpt_evaluation.get('context_relevance_score')}, overall={gpt_evaluation.get('overall_score')}")
-                else:
-                    logger.error(f"❌ [AUTO_TRANSCRIBE_RAW] GPT evaluation is not dict before logging: {type(gpt_evaluation)}")
-            
-            # Step 5: Combine results
-            ml_score = ml_prediction.get('predicted_score', 5.0)
-            # Additional safety check before using .get() on gpt_evaluation
-            if isinstance(gpt_evaluation, dict):
-                gpt_overall_score = gpt_evaluation.get('overall_score', 5.0)
-                # Extract individual scores from GPT evaluation
-                vocab_score = gpt_evaluation.get('vocabulary_score')
-                context_score = gpt_evaluation.get('context_relevance_score', 5.0)
-            else:
-                logger.error(f"❌ [AUTO_TRANSCRIBE_RAW] GPT evaluation is not dict before combining results: {type(gpt_evaluation)}")
-                gpt_overall_score = 5.0
-                vocab_score = None
-                context_score = 5.0
-            
-            # Validate scores to ensure no NaN/Inf
-            if np.isnan(ml_score) or np.isinf(ml_score):
-                logger.warning(f"⚠️ Invalid ML score: {ml_score}, using fallback")
-                ml_score = 5.0
-            if np.isnan(gpt_overall_score) or np.isinf(gpt_overall_score):
-                logger.warning(f"⚠️ Invalid GPT overall score: {gpt_overall_score}, using fallback")
-                gpt_overall_score = 5.0
-            if vocab_score is not None and (np.isnan(vocab_score) or np.isinf(vocab_score)):
-                logger.warning(f"⚠️ Invalid vocabulary score: {vocab_score}, setting to None")
-                vocab_score = None
-
-            # Tầng 2: Đánh giá mức độ nguy cơ và tính điểm MMSE cuối cùng
-            # Dam bao final_score luon duoc tinh (so nguyen >0, <30)
-            # Extract MCI analysis if available from new modules
-            mci_analysis = gpt_evaluation.get('mci_analysis') if isinstance(gpt_evaluation, dict) else None
-            try:
-                # ❌ REMOVED: ML/fusion scoring replaced by rule-based scoring
-                # Use rule-based scoring instead - this endpoint needs question_id
-                logger.warning("⚠️ This endpoint should use rule-based scoring with question_id")
-                final_score = 15  # Fallback
-                logger.info(f"✅ Final MMSE score calculated: {final_score}/30")
-            except Exception as e:
-                logger.error(f"❌ Error calculating final score: {e}")
-                # Fallback: sử dụng ML score làm điểm tạm thời (đảm bảo >0, <30)
-                fallback_score = int(round(max(1.0, min(29.0, ml_score))))
-                final_score = fallback_score
-                logger.warning(f"⚠️ Using fallback score: {final_score}/30")
-            
-            # Đảm bảo final_score là số nguyên trong khoảng (0, 30)
-            if not isinstance(final_score, int):
-                final_score = int(round(final_score))
-            final_score = max(1, min(29, final_score))  # >0, <30
+                # ✅ Hiển thị toàn bộ GPT evaluation result
+                logger.info("=" * 60)
+                logger.info("📊 GPT EVALUATION RESULT (FULL)")
+                logger.info("=" * 60)
+                import json
+                logger.info(f"✅ GPT Evaluation (Full JSON):\n{json.dumps(gpt_evaluation, ensure_ascii=False, indent=2)}")
+                logger.info("=" * 60)
             
             result = {
                 'success': True,
                 'transcription': transcription_result,
-                'audio_features': audio_features,
-                'ml_prediction': ml_prediction,
+                'audio_features': audio_features,  # ✅ Lưu acoustic features (bao gồm F0 contour đầy đủ)
+                'linguistic_features': linguistic_features,  # ✅ Lưu linguistic features cho SHAP
                 'gpt_evaluation': gpt_evaluation,
-                'final_score': final_score,  # Số nguyên >0, <30
                 'language': language,
                 'timestamp': datetime.now().isoformat()
             }
             
-            logger.info(f"✅ Auto-transcribe assessment completed successfully - Final score: {final_score}/30")
+            # ✅ Log nơi lưu features cho SHAP analysis
+            logger.info("=" * 60)
+            logger.info("💾 FEATURES STORAGE LOCATION (for SHAP & Results)")
+            logger.info("=" * 60)
+            logger.info("📦 Response structure:")
+            logger.info("   - result['audio_features']: Acoustic features (F0 contour, eGeMAPS, voice quality, etc.)")
+            logger.info("   - result['audio_features']['f0_contour']: Full F0 contour with f0_values[] and timestamps[]")
+            logger.info("   - result['linguistic_features']: Linguistic features (lexical, syntactic, semantic)")
+            logger.info("   - result['gpt_evaluation']: GPT evaluation results")
+            logger.info("✅ All features ready for SHAP analysis and results visualization")
+            logger.info("=" * 60)
+            
+            # ✅ Clean NaN/Inf values before JSON serialization
+            def clean_for_json(obj):
+                """Recursively clean NaN, Inf, and other non-serializable values"""
+                if isinstance(obj, dict):
+                    return {k: clean_for_json(v) for k, v in obj.items()}
+                elif isinstance(obj, list):
+                    return [clean_for_json(item) for item in obj]
+                elif isinstance(obj, np.ndarray):
+                    return [clean_for_json(item) for item in obj.tolist()]
+                elif isinstance(obj, (float, np.floating, np.float32, np.float64)):
+                    if np.isnan(obj) or np.isinf(obj):
+                        return None
+                    return float(obj)
+                elif isinstance(obj, (int, np.integer, np.int32, np.int64)):
+                    return int(obj)
+                elif isinstance(obj, (np.bool_, bool)):
+                    return bool(obj)
+                elif obj is None:
+                    return None
+                elif isinstance(obj, str):
+                    return obj
+                else:
+                    # Try to convert to native Python type
+                    try:
+                        if hasattr(obj, 'item'):  # numpy scalar
+                            return clean_for_json(obj.item())
+                        return obj
+                    except (ValueError, TypeError):
+                        return str(obj)  # Fallback to string
+            
+            result = clean_for_json(result)
+            
+            logger.info(f"✅ Auto-transcribe assessment completed successfully")
             return jsonify(result)
             
         finally:
@@ -5962,6 +5981,325 @@ def generate_risk_assessment():
         logger.error(f"❌ Risk assessment failed: {e}")
         import traceback
         traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/shap-explanations/<session_id>', methods=['GET'])
+def get_shap_explanations(session_id):
+    """
+    Get SHAP explanations for a session
+    
+    Returns comprehensive SHAP-based explanations including:
+    - Feature contributions
+    - Human-readable explanations
+    - Visualizations
+    - Recommendations
+    """
+    try:
+        logger.info(f"🔍 Generating SHAP explanations for session: {session_id}")
+        
+        # Get assessment results
+        session_results = [r for r in assessment_db.get('results', []) if r.get('session_id') == session_id]
+        
+        if not session_results:
+            session_results = question_results_db.get(session_id, [])
+        
+        if not session_results:
+            return jsonify({
+                'success': False,
+                'error': f'No results found for session {session_id}'
+            }), 404
+        
+        # Aggregate features
+        all_audio_features = {}
+        all_linguistic_features = {}
+        mmse_score = 0
+        
+        for result in session_results:
+            if result.get('audio_features'):
+                for key, value in result['audio_features'].items():
+                    if key not in all_audio_features:
+                        all_audio_features[key] = []
+                    if isinstance(value, (int, float)):
+                        all_audio_features[key].append(value)
+            
+            if result.get('linguistic_features'):
+                for key, value in result['linguistic_features'].items():
+                    if key not in all_linguistic_features:
+                        all_linguistic_features[key] = []
+                    if isinstance(value, (int, float)):
+                        all_linguistic_features[key].append(value)
+            
+            # Get MMSE score if available
+            if result.get('mmse_score'):
+                mmse_score = result.get('mmse_score')
+        
+        # Average features
+        avg_audio_features = {
+            k: sum(v) / len(v) if v else 0.0
+            for k, v in all_audio_features.items()
+        }
+        avg_linguistic_features = {
+            k: sum(v) / len(v) if v else 0.0
+            for k, v in all_linguistic_features.items()
+        }
+        
+        # Determine risk level from MMSE
+        if mmse_score >= 24:
+            risk_level = 'low'
+        elif mmse_score >= 18:
+            risk_level = 'mild'
+        elif mmse_score >= 10:
+            risk_level = 'moderate'
+        else:
+            risk_level = 'severe'
+        
+        # Generate SHAP explanations
+        from modules.report_generator import generate_complete_report
+        
+        report_package = generate_complete_report(
+            audio_features=avg_audio_features,
+            linguistic_features=avg_linguistic_features,
+            mmse_score=mmse_score,
+            risk_level=risk_level,
+            language='vi'
+        )
+        
+        if not report_package:
+            return jsonify({
+                'success': False,
+                'error': 'Failed to generate SHAP explanations'
+            }), 500
+        
+        return jsonify({
+            'success': True,
+            'data': report_package.get('explanations', {}),
+            'visualizations': report_package.get('visualizations', {}),
+            'shap_result': report_package.get('shap_result', {})
+        })
+        
+    except Exception as e:
+        logger.error(f"❌ SHAP explanations failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/shap-report/<session_id>', methods=['GET'])
+def get_shap_report(session_id):
+    """
+    Generate and download SHAP report (PDF or HTML)
+    
+    Query params:
+    - format: 'pdf' or 'html' (default: 'pdf')
+    """
+    try:
+        format_type = request.args.get('format', 'pdf')
+        
+        # Get assessment results (same as above)
+        session_results = [r for r in assessment_db.get('results', []) if r.get('session_id') == session_id]
+        
+        if not session_results:
+            session_results = question_results_db.get(session_id, [])
+        
+        if not session_results:
+            return jsonify({
+                'success': False,
+                'error': f'No results found for session {session_id}'
+            }), 404
+        
+        # Aggregate features (same logic as above)
+        all_audio_features = {}
+        all_linguistic_features = {}
+        mmse_score = 0
+        
+        for result in session_results:
+            if result.get('audio_features'):
+                for key, value in result['audio_features'].items():
+                    if key not in all_audio_features:
+                        all_audio_features[key] = []
+                    if isinstance(value, (int, float)):
+                        all_audio_features[key].append(value)
+            
+            if result.get('linguistic_features'):
+                for key, value in result['linguistic_features'].items():
+                    if key not in all_linguistic_features:
+                        all_linguistic_features[key] = []
+                    if isinstance(value, (int, float)):
+                        all_linguistic_features[key].append(value)
+            
+            if result.get('mmse_score'):
+                mmse_score = result.get('mmse_score')
+        
+        avg_audio_features = {
+            k: sum(v) / len(v) if v else 0.0
+            for k, v in all_audio_features.items()
+        }
+        avg_linguistic_features = {
+            k: sum(v) / len(v) if v else 0.0
+            for k, v in all_linguistic_features.items()
+        }
+        
+        if mmse_score >= 24:
+            risk_level = 'low'
+        elif mmse_score >= 18:
+            risk_level = 'mild'
+        elif mmse_score >= 10:
+            risk_level = 'moderate'
+        else:
+            risk_level = 'severe'
+        
+        # Generate report
+        from modules.report_generator import generate_complete_report
+        
+        report_package = generate_complete_report(
+            audio_features=avg_audio_features,
+            linguistic_features=avg_linguistic_features,
+            mmse_score=mmse_score,
+            risk_level=risk_level,
+            language='vi'
+        )
+        
+        if format_type == 'pdf':
+            pdf_bytes = report_package.get('pdf', b'')
+            if not pdf_bytes:
+                return jsonify({
+                    'success': False,
+                    'error': 'PDF generation failed'
+                }), 500
+            
+            from flask import Response
+            return Response(
+                pdf_bytes,
+                mimetype='application/pdf',
+                headers={
+                    'Content-Disposition': f'attachment; filename=shap-report-{session_id}.pdf'
+                }
+            )
+        else:
+            html_report = report_package.get('html', '')
+            if not html_report:
+                return jsonify({
+                    'success': False,
+                    'error': 'HTML generation failed'
+                }), 500
+            
+            from flask import Response
+            return Response(
+                html_report,
+                mimetype='text/html',
+                headers={
+                    'Content-Disposition': f'attachment; filename=shap-report-{session_id}.html'
+                }
+            )
+        
+    except Exception as e:
+        logger.error(f"❌ SHAP report generation failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/features/<session_id>', methods=['GET'])
+def get_session_features(session_id):
+    """Get detailed acoustic and linguistic features for a session"""
+    try:
+        logger.info(f"📊 Fetching features for session: {session_id}")
+        
+        # Try to get from assessment_db first
+        session_results = [r for r in assessment_db.get('results', []) if r.get('session_id') == session_id]
+        
+        if not session_results:
+            # Try to get from question_results_db
+            session_results = question_results_db.get(session_id, [])
+        
+        if not session_results:
+            return jsonify({
+                'success': False,
+                'error': f'No results found for session {session_id}'
+            }), 404
+        
+        # Aggregate features from all questions
+        all_audio_features = {}
+        all_linguistic_features = {}
+        f0_contours = []
+        
+        for result in session_results:
+            # Collect audio features
+            if result.get('audio_features'):
+                for key, value in result['audio_features'].items():
+                    if key not in all_audio_features:
+                        all_audio_features[key] = []
+                    if isinstance(value, (int, float)):
+                        all_audio_features[key].append(value)
+                    elif isinstance(value, dict) and key == 'f0_contour':
+                        # Store F0 contour separately
+                        f0_contours.append({
+                            'question_id': result.get('question_id', 'unknown'),
+                            'f0_contour': value
+                        })
+            
+            # Collect linguistic features
+            if result.get('linguistic_features'):
+                for key, value in result['linguistic_features'].items():
+                    if key not in all_linguistic_features:
+                        all_linguistic_features[key] = []
+                    if isinstance(value, (int, float)):
+                        all_linguistic_features[key].append(value)
+        
+        # Average numeric features
+        avg_audio_features = {
+            k: float(sum(v) / len(v)) if v else 0.0 
+            for k, v in all_audio_features.items() 
+            if k != 'f0_contour'
+        }
+        
+        avg_linguistic_features = {
+            k: float(sum(v) / len(v)) if v else 0.0 
+            for k, v in all_linguistic_features.items()
+        }
+        
+        # Get per-question features
+        per_question_features = []
+        for result in session_results:
+            per_question_features.append({
+                'question_id': result.get('question_id', 'unknown'),
+                'question_text': result.get('question_text', ''),
+                'audio_features': result.get('audio_features', {}),
+                'linguistic_features': result.get('linguistic_features', {}),
+                'gpt_evaluation': result.get('gpt_evaluation', {}),
+                'transcript': result.get('transcript', '')
+            })
+        
+        response = {
+            'success': True,
+            'session_id': session_id,
+            'summary': {
+                'total_questions': len(session_results),
+                'audio_features_count': len(avg_audio_features),
+                'linguistic_features_count': len(avg_linguistic_features),
+                'f0_contours_count': len(f0_contours)
+            },
+            'averaged_features': {
+                'audio_features': avg_audio_features,
+                'linguistic_features': avg_linguistic_features
+            },
+            'f0_contours': f0_contours,  # ✅ Full F0 contours for visualization
+            'per_question_features': per_question_features,  # ✅ Per-question breakdown
+            'raw_results': session_results  # ✅ Full raw data
+        }
+        
+        logger.info(f"✅ Features retrieved: {len(avg_audio_features)} audio, {len(avg_linguistic_features)} linguistic, {len(f0_contours)} F0 contours")
+        return jsonify(response)
+        
+    except Exception as e:
+        logger.error(f"❌ Error fetching features: {e}")
         return jsonify({
             'success': False,
             'error': str(e)
