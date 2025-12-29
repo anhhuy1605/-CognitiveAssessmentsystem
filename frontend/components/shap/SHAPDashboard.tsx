@@ -25,6 +25,7 @@ interface SHAPData {
     importance_bar?: string;
     radar_chart?: string;
     risk_gauge?: string;
+    animation_html?: string;
   };
 }
 
