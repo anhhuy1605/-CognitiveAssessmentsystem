@@ -202,6 +202,9 @@ jobs:
     needs: [test, security]
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     timeout-minutes: 20
+    env:
+      BACKEND_URL: ${{ secrets.BACKEND_URL }}
+      RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
 
     steps:
       - name: Checkout code
@@ -230,15 +233,15 @@ jobs:
 
       # Health check
       - name: Wait for backend deployment
-        if: ${{ secrets.BACKEND_URL != '' }}
+        if: ${{ env.BACKEND_URL != '' }}
         run: |
           echo "Waiting for backend to be ready..."
-          timeout 300 bash -c 'while ! curl -f ${{ secrets.BACKEND_URL }}/api/health; do sleep 10; done' || true
+          timeout 300 bash -c 'while ! curl -f ${{ env.BACKEND_URL }}/api/health; do sleep 10; done' || true
 
       - name: Backend health check
-        if: ${{ secrets.BACKEND_URL != '' }}
+        if: ${{ env.BACKEND_URL != '' }}
         run: |
-          if curl -f ${{ secrets.BACKEND_URL }}/api/health; then
+          if curl -f ${{ env.BACKEND_URL }}/api/health; then
             echo "✅ Backend is healthy"
           else
             echo "❌ Backend health check failed"
@@ -246,7 +249,7 @@ jobs:
           fi
 
       - name: Skip health check (no URL)
-        if: ${{ secrets.BACKEND_URL == '' }}
+        if: ${{ env.BACKEND_URL == '' }}
         run: echo "⚠️ BACKEND_URL not configured. Skipping health check."
 
   # ================================
@@ -311,6 +314,9 @@ jobs:
     needs: [deploy-backend, deploy-frontend]
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     timeout-minutes: 10
+    env:
+      BACKEND_URL: ${{ secrets.BACKEND_URL }}
+      FRONTEND_URL: ${{ secrets.FRONTEND_URL }}
 
     steps:
       - name: Checkout code
@@ -321,39 +327,39 @@ jobs:
 
       # Test backend API
       - name: Test backend API endpoints
-        if: ${{ secrets.BACKEND_URL != '' }}
+        if: ${{ env.BACKEND_URL != '' }}
         run: |
           # Test health endpoint
-          curl -f ${{ secrets.BACKEND_URL }}/api/health || exit 1
+          curl -f ${{ env.BACKEND_URL }}/api/health || exit 1
 
           # Test MMSE questions endpoint
-          curl -f ${{ secrets.BACKEND_URL }}/api/mmse/questions || exit 1
+          curl -f ${{ env.BACKEND_URL }}/api/mmse/questions || exit 1
 
           echo "✅ Backend API tests passed"
 
       # Test frontend accessibility
       - name: Test frontend accessibility
-        if: ${{ secrets.FRONTEND_URL != '' }}
+        if: ${{ env.FRONTEND_URL != '' }}
         run: |
           # Test homepage
-          curl -f ${{ secrets.FRONTEND_URL }} || exit 1
+          curl -f ${{ env.FRONTEND_URL }} || exit 1
 
           # Test cognitive assessment page
-          curl -f ${{ secrets.FRONTEND_URL }}/cognitive-assessment || exit 1
+          curl -f ${{ env.FRONTEND_URL }}/cognitive-assessment || exit 1
 
           echo "✅ Frontend accessibility tests passed"
 
       # Performance check
       - name: Performance check
-        if: ${{ secrets.BACKEND_URL != '' }}
+        if: ${{ env.BACKEND_URL != '' }}
         run: |
-          URL="${{ secrets.BACKEND_URL }}/api/health"
+          URL="${{ env.BACKEND_URL }}/api/health"
           RT=$(curl -o /dev/null -s -w '%{time_total}' "$URL" || echo "fail")
           if [ "$RT" = "fail" ]; then echo "Error: request failed"; exit 1; fi
           awk -v t="$RT" 'BEGIN{ if (t+0>2.0) { printf("Warning: slow response %.2fs\n", t+0) } else { printf("OK: response %.2fs\n", t+0) } }'
 
       - name: Skip tests (URLs not configured)
-        if: ${{ secrets.BACKEND_URL == '' || secrets.FRONTEND_URL == '' }}
+        if: ${{ env.BACKEND_URL == '' || env.FRONTEND_URL == '' }}
         run: echo "⚠️ BACKEND_URL or FRONTEND_URL not configured. Skipping post-deploy tests."
 
   # ================================

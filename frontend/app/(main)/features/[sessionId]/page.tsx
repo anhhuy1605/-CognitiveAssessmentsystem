@@ -230,7 +230,7 @@ export default function FeaturesPage() {
                 {Object.entries(features.averaged_features.audio_features).map(([key, value]) => (
                   <div key={key} className="flex justify-between items-center p-2 hover:bg-gray-50 rounded">
                     <span className="text-sm font-mono">{key}</span>
-                    <Badge variant="outline">{typeof value === 'number' ? value.toFixed(4) : String(value)}</Badge>
+                    <Badge className="bg-gray-100 text-gray-800 border border-gray-300">{typeof value === 'number' ? value.toFixed(4) : String(value)}</Badge>
                   </div>
                 ))}
               </div>
@@ -250,7 +250,7 @@ export default function FeaturesPage() {
                 {Object.entries(features.averaged_features.linguistic_features).map(([key, value]) => (
                   <div key={key} className="flex justify-between items-center p-2 hover:bg-gray-50 rounded">
                     <span className="text-sm font-mono">{key}</span>
-                    <Badge variant="outline">{typeof value === 'number' ? value.toFixed(4) : String(value)}</Badge>
+                    <Badge className="bg-gray-100 text-gray-800 border border-gray-300">{typeof value === 'number' ? value.toFixed(4) : String(value)}</Badge>
                   </div>
                 ))}
               </div>
