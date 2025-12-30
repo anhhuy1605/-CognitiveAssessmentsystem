@@ -24,6 +24,9 @@ WORKDIR /app
 # - libpq-dev: For psycopg2
 # - libsndfile1: For audio processing (soundfile, librosa)
 # - ffmpeg: For audio format conversion (pydub)
+# - curl: For installing Rust
+# - cmake: For building praat-parselmouth (required by scikit-build)
+# - make: For CMake's Unix Makefiles generator (required by praat-parselmouth)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     g++ \
@@ -31,7 +34,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libsndfile1 \
     libsndfile1-dev \
     ffmpeg \
+    curl \
+    cmake \
+    make \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Rust (required for building underthesea-core from source)
+# Set PATH via ENV so it persists across RUN commands
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
 
 # Copy requirements first (for Docker layer caching)
 COPY requirements.txt .
@@ -39,8 +50,13 @@ COPY requirements.txt .
 # Install Python dependencies
 # Using --no-cache-dir to reduce image size
 # Using pip==23.3.2 for stability
+# Install build tools first (needed with --no-build-isolation):
+#   - maturin: for building underthesea-core (Rust-based)
+#   - scikit-build: for building praat-parselmouth (CMake-based)
+# Use --no-build-isolation so build tools are available during package builds
 RUN pip install --no-cache-dir --upgrade pip==23.3.2 && \
-    pip install --no-cache-dir -r requirements.txt
+    pip install --no-cache-dir maturin==1.9.4 scikit-build && \
+    pip install --no-cache-dir --no-build-isolation -r requirements.txt
 
 # ==================================
 # STAGE 2: Runtime - Lean production image
@@ -104,7 +120,7 @@ CMD gunicorn \
 # ==================================
 # NOTES FOR DEPLOYMENT:
 # ==================================
-# 
+#
 # Railway Environment Variables needed:
 # - PORT (auto-injected by Railway)
 # - DATABASE_URL (from Neon)
@@ -112,18 +128,18 @@ CMD gunicorn \
 # - GEMINI_API_KEY
 # - SECRET_KEY
 # - CORS_ORIGINS
-# 
+#
 # Optional for scaling:
 # - WEB_CONCURRENCY=4 (for 8GB RAM)
 # - GUNICORN_TIMEOUT=300 (default 5 min)
 # - LOG_LEVEL=info (debug|info|warning|error)
-# 
+#
 # Build command:
 #   docker build -t cognitive-backend .
-# 
+#
 # Run locally:
 #   docker run -p 8000:8000 --env-file .env cognitive-backend
-# 
+#
 # Image size: ~2.5GB (PyTorch + Transformers are large)
 # RAM usage: ~2.8GB minimum (ML models)
 # Recommended Railway plan: Pro (8GB RAM, $20/month)
