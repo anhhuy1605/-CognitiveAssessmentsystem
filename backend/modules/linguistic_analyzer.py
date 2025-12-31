@@ -35,6 +35,14 @@ except ImportError:
     logger.warning("py_vncorenlp not available. Word segmentation will be limited.")
 
 try:
+    import underthesea
+    UNDERTHESEA_AVAILABLE = True
+except ImportError:
+    UNDERTHESEA_AVAILABLE = False
+    underthesea = None
+    logger.warning("underthesea not available. Tokenization/POS tagging will be limited.")
+
+try:
     from transformers import AutoTokenizer, AutoModel
     import torch
     TRANSFORMERS_AVAILABLE = True

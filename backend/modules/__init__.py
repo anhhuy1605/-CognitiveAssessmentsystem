@@ -20,46 +20,18 @@ Usage:
     result = analyze_for_mci(audio_path="audio.wav", transcript="...")
 """
 
-# Import with graceful fallback for missing dependencies
-try:
-    from .acoustic_analyzer import AcousticAnalyzer, extract_acoustic_features
-except ImportError:
-    AcousticAnalyzer = None
-    extract_acoustic_features = None
-
-try:
-    from .linguistic_analyzer import VietnameseLinguisticAnalyzer, extract_linguistic_features
-except ImportError:
-    VietnameseLinguisticAnalyzer = None
-    extract_linguistic_features = None
-
-try:
-    from .multimodal_fusion import MultimodalFusion, FusionConfig, fuse_multimodal_features
-except ImportError:
-    MultimodalFusion = None
-    FusionConfig = None
-    fuse_multimodal_features = None
-
-try:
-    from .mci_predictor import MCIPredictor, MCIPrediction, predict_mci, estimate_mmse
-except ImportError:
-    MCIPredictor = None
-    MCIPrediction = None
-    predict_mci = None
-    estimate_mmse = None
-
-try:
-    from .integration_service import (
-        MCIScreeningService, 
-        AnalysisResult,
-        get_mci_service,
-        analyze_for_mci
-    )
-except ImportError:
-    MCIScreeningService = None
-    AnalysisResult = None
-    get_mci_service = None
-    analyze_for_mci = None
+# Import modules - if import succeeds, module will be used (not None)
+# If import fails, raise error (no graceful fallback - system requires these modules)
+from .acoustic_analyzer import AcousticAnalyzer, extract_acoustic_features
+from .linguistic_analyzer import VietnameseLinguisticAnalyzer, extract_linguistic_features
+from .multimodal_fusion import MultimodalFusion, FusionConfig, fuse_multimodal_features
+from .mci_predictor import MCIPredictor, MCIPrediction, predict_mci, estimate_mmse
+from .integration_service import (
+    MCIScreeningService, 
+    AnalysisResult,
+    get_mci_service,
+    analyze_for_mci
+)
 
 __all__ = [
     # Core analyzers

@@ -46,16 +46,16 @@ def create_app():
     logger.info("🚀 Initializing Vietnamese Cognitive Assessment Backend...")
     
     try:
-        from app import app as flask_app, initialize_model
+        from app import app as flask_app, initialize_transcriber
         app = flask_app
         
-        # Initialize model in background
+        # Initialize transcriber in background
         try:
-            initialize_model()
-            logger.info("✅ Model initialization completed")
+            initialize_transcriber()
+            logger.info("✅ Transcriber initialization completed")
         except Exception as e:
-            logger.error(f"❌ Model initialization failed: {e}")
-            logger.info("ℹ️ Server will start with limited functionality")
+            logger.error(f"❌ Transcriber initialization failed: {e}")
+            logger.info("ℹ️ Server will start but transcription may not work")
         
         return app
     except Exception as e:

@@ -22,34 +22,12 @@ import time
 
 logger = logging.getLogger(__name__)
 
-# Import modules with graceful fallback
-try:
-    from .acoustic_analyzer import AcousticAnalyzer
-    ACOUSTIC_AVAILABLE = True
-except ImportError as e:
-    ACOUSTIC_AVAILABLE = False
-    logger.warning(f"AcousticAnalyzer not available: {e}")
-
-try:
-    from .linguistic_analyzer import VietnameseLinguisticAnalyzer
-    LINGUISTIC_AVAILABLE = True
-except ImportError as e:
-    LINGUISTIC_AVAILABLE = False
-    logger.warning(f"LinguisticAnalyzer not available: {e}")
-
-try:
-    from .multimodal_fusion import MultimodalFusion, FusionConfig
-    FUSION_AVAILABLE = True
-except ImportError as e:
-    FUSION_AVAILABLE = False
-    logger.warning(f"MultimodalFusion not available: {e}")
-
-try:
-    from .mci_predictor import MCIPredictor, MCIPrediction
-    PREDICTOR_AVAILABLE = True
-except ImportError as e:
-    PREDICTOR_AVAILABLE = False
-    logger.warning(f"MCIPredictor not available: {e}")
+# Import modules - if import succeeds, module will be used (not None)
+# If import fails, raise error (no graceful fallback - system requires these modules)
+from .acoustic_analyzer import AcousticAnalyzer
+from .linguistic_analyzer import VietnameseLinguisticAnalyzer
+from .multimodal_fusion import MultimodalFusion, FusionConfig
+from .mci_predictor import MCIPredictor, MCIPrediction
 
 
 @dataclass
@@ -104,67 +82,55 @@ class MCIScreeningService:
             if model_path:
                 logger.info(f"✅ Auto-detected newest model: {model_path}")
         
-        # Initialize acoustic analyzer
-        self.acoustic_analyzer = None
-        if ACOUSTIC_AVAILABLE:
-            try:
-                self.acoustic_analyzer = AcousticAnalyzer()
-                logger.info("✅ AcousticAnalyzer initialized")
-            except Exception as e:
-                logger.error(f"Failed to initialize AcousticAnalyzer: {e}")
-                self.errors.append(f"AcousticAnalyzer: {e}")
-        else:
-            logger.warning("⚠️ AcousticAnalyzer not available")
+        # Initialize acoustic analyzer - if import succeeded, must use it
+        try:
+            self.acoustic_analyzer = AcousticAnalyzer()
+            logger.info("✅ AcousticAnalyzer initialized")
+        except Exception as e:
+            logger.error(f"Failed to initialize AcousticAnalyzer: {e}")
+            self.errors.append(f"AcousticAnalyzer: {e}")
+            raise  # If import succeeded but init failed, raise error
         
-        # Initialize linguistic analyzer (using underthesea + PhoBERT, no VnCoreNLP)
-        self.linguistic_analyzer = None
-        if LINGUISTIC_AVAILABLE:
-            try:
-                self.linguistic_analyzer = VietnameseLinguisticAnalyzer(
-                    use_phobert=use_phobert
-                )
-                logger.info("✅ LinguisticAnalyzer initialized (underthesea + PhoBERT)")
-            except Exception as e:
-                logger.error(f"Failed to initialize LinguisticAnalyzer: {e}")
-                self.errors.append(f"LinguisticAnalyzer: {e}")
-        else:
-            logger.warning("⚠️ LinguisticAnalyzer not available")
+        # Initialize linguistic analyzer - if import succeeded, must use it
+        try:
+            self.linguistic_analyzer = VietnameseLinguisticAnalyzer(
+                use_phobert=use_phobert
+            )
+            logger.info("✅ LinguisticAnalyzer initialized (underthesea + PhoBERT)")
+        except Exception as e:
+            logger.error(f"Failed to initialize LinguisticAnalyzer: {e}")
+            self.errors.append(f"LinguisticAnalyzer: {e}")
+            raise  # If import succeeded but init failed, raise error
         
-        # Initialize multimodal fusion
-        self.fusion = None
-        if FUSION_AVAILABLE:
-            try:
-                config = FusionConfig(
-                    acoustic_weight=0.5,
-                    linguistic_weight=0.5,
-                    fusion_method='early',
-                    normalize=True
-                )
-                self.fusion = MultimodalFusion(config)
-                logger.info("✅ MultimodalFusion initialized")
-            except Exception as e:
-                logger.error(f"Failed to initialize MultimodalFusion: {e}")
-                self.errors.append(f"MultimodalFusion: {e}")
-        else:
-            logger.warning("⚠️ MultimodalFusion not available")
+        # Initialize multimodal fusion - if import succeeded, must use it
+        try:
+            config = FusionConfig(
+                acoustic_weight=0.5,
+                linguistic_weight=0.5,
+                fusion_method='early',
+                normalize=True
+            )
+            self.fusion = MultimodalFusion(config)
+            logger.info("✅ MultimodalFusion initialized")
+        except Exception as e:
+            logger.error(f"Failed to initialize MultimodalFusion: {e}")
+            self.errors.append(f"MultimodalFusion: {e}")
+            raise  # If import succeeded but init failed, raise error
         
-        # Initialize predictor with auto-detected newest model
-        self.predictor = None
-        if PREDICTOR_AVAILABLE:
-            try:
-                # Auto-detect newest model if not provided
-                if model_path is None:
-                    model_path = self._find_newest_model()
-                    if model_path:
-                        logger.info(f"✅ Auto-detected newest model: {model_path}")
-                
-                self.predictor = MCIPredictor(model_path)
-                logger.info("✅ MCIPredictor initialized")
-            except Exception as e:
-                logger.error(f"Failed to initialize MCIPredictor: {e}")
-                self.errors.append(f"MCIPredictor: {e}")
-        else:
-            logger.warning("⚠️ MCIPredictor not available")
+        # Initialize predictor with auto-detected newest model - if import succeeded, must use it
+        try:
+            # Auto-detect newest model if not provided
+            if model_path is None:
+                model_path = self._find_newest_model()
+                if model_path:
+                    logger.info(f"✅ Auto-detected newest model: {model_path}")
+            
+            self.predictor = MCIPredictor(model_path)
+            logger.info("✅ MCIPredictor initialized")
+        except Exception as e:
+            logger.error(f"Failed to initialize MCIPredictor: {e}")
+            self.errors.append(f"MCIPredictor: {e}")
+            raise  # If import succeeded but init failed, raise error
         
         logger.info(f"MCIScreeningService initialized (errors: {len(self.errors)})")
     

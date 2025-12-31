@@ -242,156 +242,32 @@ except ImportError as e:
         logger.error(f"❌ Still cannot import critical packages: {e}")
         sys.exit(1)
 
-# Try to import the ML model
-try:
-    from clinical_ml_models import (
-        TierOneScreeningModel, TierTwoEnsembleModel,
-        ClinicalValidationFramework, VietnameseDataCollection
-    )
-    logger.info("✅ Clinical ML models imported successfully (2-tier architecture)")
+# Import Vietnamese transcriber - if import succeeds, module will be used (not None)
+# If import fails, raise error (no graceful fallback - system requires this module)
+from vietnamese_transcriber import VietnameseTranscriber
+logger.info("✅ Vietnamese transcriber imported successfully")
 
-    # Create unified model wrapper for compatibility
-    class CognitiveAssessmentModel:
-        """
-        Unified model wrapper combining Tier 1 and Tier 2 models
-        Follows document requirements for 2-tier ML architecture
-        """
-        def __init__(self):
-            self.tier1_model = TierOneScreeningModel()
-            self.tier2_model = TierTwoEnsembleModel()
-            self.validation_framework = ClinicalValidationFramework()
+# Import language management - if import succeeds, module will be used (not None)
+# If import fails, raise error (no graceful fallback - system requires this module)
+from languages import t, language_manager
+logger.info("✅ Language management imported successfully")
 
-        def predict_mmse(self, features: dict) -> dict:
-            """
-            Unified prediction method compatible with existing API
-            """
-            import numpy as np
+# Import MCI Screening Modules - if import succeeds, module will be used (not None)
+# If import fails, raise error (no graceful fallback - system requires these modules)
+from modules.integration_service import MCIScreeningService, get_mci_service, analyze_for_mci
+from modules.acoustic_analyzer import AcousticAnalyzer
+from modules.linguistic_analyzer import VietnameseLinguisticAnalyzer
+from modules.mci_predictor import MCIPredictor
 
-            # Convert features to numpy array
-            feature_values = np.array([list(features.values())])
+# Initialize MCI service with PhoBERT for best results
+# model_path=None will auto-detect newest model (models/best_model.pkl)
+mci_service = MCIScreeningService(model_path=None, use_phobert=True)
+MCI_MODULES_AVAILABLE = True
 
-            # Tier 1: Binary screening
-            screening_result = self.tier1_model.predict_proba(feature_values)[0]
-
-            # Tier 2: Multi-class + regression prediction
-            ensemble_predictions = self.tier2_model.predict(feature_values)
-
-            # Combine results
-            result = {
-                'tier1_screening_probability': screening_result,
-                'tier2_class_prediction': ensemble_predictions['class_predictions'][0],
-                'tier2_mmse_prediction': float(ensemble_predictions['mmse_predictions'][0]),
-                'tier2_confidence': float(ensemble_predictions['confidence'][0]),
-                'screening_threshold': 0.5,
-                'needs_clinical_attention': screening_result >= 0.5
-            }
-
-            return result
-
-        def validate_model_requirements(self) -> dict:
-            """
-            Validate model meets clinical requirements
-            """
-            return {
-                'tier1_sensitivity_target': '>=95%',
-                'tier1_specificity_target': '>=90%',
-                'tier2_auc_target': '>=0.85',
-                'tier2_mae_target': '<=2.5',
-                'architecture': '2-tier (Screening + Ensemble)',
-                'validated': True
-            }
-
-    # Backward compatibility aliases
-    MultimodalCognitiveAssessment = CognitiveAssessmentModel
-    EnhancedMultimodalCognitiveModel = CognitiveAssessmentModel
-
-except ImportError as e:
-    logger.warning(f"⚠️ Cannot import clinical ML models: {e}")
-    logger.info("ℹ️ Model functionality will be limited")
-    CognitiveAssessmentModel = None
-    MultimodalCognitiveAssessment = None
-
-# Try to import the Vietnamese transcriber (now Gemini-first)
-try:
-    from vietnamese_transcriber import VietnameseTranscriber
-    logger.info("✅ Vietnamese transcriber imported successfully")
-except ImportError as e:
-    logger.warning(f"⚠️ Cannot import Vietnamese transcriber: {e}")
-    logger.info("ℹ️ Auto-transcription functionality will be limited")
-    VietnameseTranscriber = None
-
-# Speech-based MMSE support integrated into clinical_ml_models
-    SPEECH_MMSE_AVAILABLE = False
-    get_speech_mmse_support = None
-logger.info("ℹ️ Speech-based MMSE support integrated into clinical_ml_models")
-
-# Try to import language management
-try:
-    from languages import t, language_manager
-    logger.info("✅ Language management imported successfully")
-except ImportError as e:
-    logger.warning(f"⚠️ Cannot import language management: {e}")
-    t = lambda x: x  # Identity function fallback
-    language_manager = None
-
-# Initialize MMSE Inference Pipeline
-try:
-    from inference_pipeline import InferenceConfig, MMSEInferencePipeline
-    from audio_feature_extractor import AudioFeatureExtractor
-
-    # Configure inference pipeline
-    inference_config = InferenceConfig(
-        use_gpu=torch.cuda.is_available(),
-        enable_caching=True,
-        max_workers=4,
-        include_uncertainty=True,
-        include_interpretation=True,
-        save_intermediates=False
-    )
-
-    mmse_pipeline = MMSEInferencePipeline(inference_config)
-
-    # Defer heavy model loading; provide initializer callable
-    def initialize_model():
-        try:
-            mmse_pipeline.load_model()
-            logger.info("✅ MMSE model initialized (deferred)")
-        except Exception as e:
-            logger.error(f"❌ Deferred model initialization failed: {e}")
-
-    logger.info("✅ MMSE Inference Pipeline initialized (model load deferred)")
-
-except ImportError as e:
-    logger.warning(f"⚠️ Cannot import MMSE inference pipeline: {e}")
-    mmse_pipeline = None
-
-# Import MCI Screening Modules (NEW - Primary pipeline)
-mci_service = None
-MCI_MODULES_AVAILABLE = False
-try:
-    from modules.integration_service import MCIScreeningService, get_mci_service, analyze_for_mci
-    from modules.acoustic_analyzer import AcousticAnalyzer
-    from modules.linguistic_analyzer import VietnameseLinguisticAnalyzer
-    from modules.mci_predictor import MCIPredictor
-    
-    # Initialize MCI service with PhoBERT for best results
-    # model_path=None will auto-detect newest model (models/best_model.pkl)
-    mci_service = MCIScreeningService(model_path=None, use_phobert=True)
-    MCI_MODULES_AVAILABLE = True
-    
-    logger.info("✅ MCI Screening Modules initialized")
-    logger.info(f"   - Acoustic Analyzer: {mci_service.acoustic_analyzer is not None}")
-    logger.info(f"   - Linguistic Analyzer: {mci_service.linguistic_analyzer is not None}")
-    logger.info(f"   - MCI Predictor: {mci_service.predictor is not None}")
-    
-except ImportError as e:
-    logger.warning(f"⚠️ MCI modules not available: {e}")
-    mci_service = None
-    MCI_MODULES_AVAILABLE = False
-except Exception as e:
-    logger.error(f"❌ MCI service initialization error: {e}")
-    mci_service = None
-    MCI_MODULES_AVAILABLE = False
+logger.info("✅ MCI Screening Modules initialized")
+logger.info(f"   - Acoustic Analyzer: {mci_service.acoustic_analyzer is not None}")
+logger.info(f"   - Linguistic Analyzer: {mci_service.linguistic_analyzer is not None}")
+logger.info(f"   - MCI Predictor: {mci_service.predictor is not None}")
 
 
 def evaluate_with_mci_modules(transcript: str, question: str = None, audio_path: str = None, 
@@ -411,7 +287,7 @@ def evaluate_with_mci_modules(transcript: str, question: str = None, audio_path:
     Returns:
         dict: Evaluation result compatible with the old format
     """
-    if not MCI_MODULES_AVAILABLE or mci_service is None:
+    if not MCI_MODULES_AVAILABLE:
         logger.warning("⚠️ MCI modules not available, falling back to GPT evaluation")
         return evaluate_with_gpt4o(transcript, question or "Danh gia tong quan", user_data, language)
     
@@ -673,8 +549,6 @@ except ImportError as e:
     logger.warning(f"⚠️ MMSE Chatbot API not available: {e}")
 
 # Global variables
-cognitive_model = None
-feature_names = None
 vietnamese_transcriber = None
 
 # Queue system for background processing
@@ -1130,185 +1004,22 @@ def queue_worker():
     
     logger.info("🛑 Queue worker stopped gracefully")
 
-# Global variables for model components
-model_scaler = None
-model_selector = None
-
-def load_model_bundle():
+# Initialize Vietnamese transcriber
+def initialize_transcriber():
     """
-    Load pre-trained model bundle - prioritize newest models.
+    Initialize Vietnamese Transcriber for ASR functionality.
+    This is part of the new pipeline (ASR -> GPT -> Modules).
+    """
+    global vietnamese_transcriber
     
-    Priority order:
-    1) models/best_model.pkl (newest, 2025-12-16)
-    2) model_bundle/model_new_clean/ (2025-12-11)
-    3) model_bundle/model_new/ (2025-12-11)
-    4) models/model.pkl (legacy)
-
-    Supports two layouts:
-    1) Legacy (separate files): model.pkl + scaler.pkl + selector.pkl + feature_names.pkl
-    2) Pipeline-only (new):     model.pkl (Pipeline contains scaler/selector) + feature_names.pkl
-    """
-    global cognitive_model, feature_names, model_scaler, model_selector
-
     try:
-        current_file = Path(__file__).resolve()
-        project_root = current_file.parent.parent
-        
-        # Priority 1: Check for newest model in models/ directory
-        newest_bundle_path = project_root / "models"
-        if newest_bundle_path.exists() and (newest_bundle_path / "best_model.pkl").exists():
-            bundle_path = newest_bundle_path
-            logger.info(f"✅ Found newest model bundle at: {bundle_path}")
-        else:
-            # Priority 2: Check model_bundle/model_new_clean/
-            clean_bundle_path = project_root / "model_bundle" / "model_new_clean"
-            if clean_bundle_path.exists() and (clean_bundle_path / "model.pkl").exists():
-                bundle_path = clean_bundle_path
-                logger.info(f"✅ Found clean model bundle at: {bundle_path}")
-            else:
-                # Priority 3: Check model_bundle/model_new/
-                new_bundle_path = project_root / "model_bundle" / "model_new"
-                if new_bundle_path.exists() and (new_bundle_path / "model.pkl").exists():
-                    bundle_path = new_bundle_path
-                    logger.info(f"✅ Found new model bundle at: {bundle_path}")
-                else:
-                    # Fallback: Use models/ directory
-                    bundle_path = project_root / "models"
-                    logger.warning(f"⚠️ Using fallback bundle path: {bundle_path}")
-
-        logger.info("=" * 60)
-        logger.info("LOADING MODEL BUNDLE")
-        logger.info("=" * 60)
-        logger.info(f"Current file: {current_file}")
-        logger.info(f"Project root: {project_root}")
-        logger.info(f"Bundle path: {bundle_path}")
-        logger.info(f"Bundle path exists: {bundle_path.exists()}")
-
-        if not bundle_path.exists():
-            logger.error(f"Model bundle not found at {bundle_path}")
-            logger.error(f"Absolute path: {bundle_path.resolve()}")
-            logger.error("Please ensure model bundle exists or train a new model")
-            return None, None, None, None
-
-        # Model file: accept best_model.pkl (new) or model.pkl (legacy)
-        model_file_new = bundle_path / "best_model.pkl"
-        model_file_legacy = bundle_path / "model.pkl"
-        model_file = model_file_new if model_file_new.exists() else model_file_legacy
-        if not model_file.exists():
-            logger.error(f"Required model file not found (best_model.pkl or model.pkl) under {bundle_path}")
-            return None, None, None, None
-
-        # Feature names (required) – accept either pkl or json
-        fnames_file_pkl = bundle_path / "feature_names.pkl"
-        fnames_file_json = bundle_path / "feature_names.json"
-        if fnames_file_pkl.exists():
-            fnames_file = fnames_file_pkl
-            feature_names = joblib.load(fnames_file)
-        elif fnames_file_json.exists():
-            fnames_file = fnames_file_json
-            import json as _json
-
-            feature_names = _json.load(open(fnames_file, "r", encoding="utf-8"))
-        else:
-            logger.error(f"Required feature names not found (.pkl or .json) under {bundle_path}")
-            return None, None, None, None
-
-        # Optional scaler/selector (legacy layout)
-        scaler_file = bundle_path / "scaler.pkl"
-        selector_file = bundle_path / "selector.pkl"
-
-        logger.info("Loading model components...")
-        model = joblib.load(model_file)
-
-        scaler = joblib.load(scaler_file) if scaler_file.exists() else None
-        selector = joblib.load(selector_file) if selector_file.exists() else None
-
-        # Load metadata if available
-        metadata_path = bundle_path / "metadata.json"
-        if metadata_path.exists():
-            with open(metadata_path, "r", encoding="utf-8") as f:
-                metadata = json.load(f)
-            logger.info(
-                f"Model metadata: {metadata.get('model_name', 'N/A')} "
-                f"v{metadata.get('version', 'N/A')}"
-            )
-            logger.info(f"Training date: {metadata.get('training_date', 'N/A')}")
-
-        cognitive_model = model
-        model_scaler = scaler
-        model_selector = selector
-
-        logger.info("=" * 60)
-        logger.info("MODEL BUNDLE LOADED SUCCESSFULLY")
-        logger.info("=" * 60)
-        logger.info(f"Model type: {type(model).__name__}")
-        logger.info(f"Features ({len(feature_names)}): {feature_names}")
-        logger.info(f"Scaler type: {type(scaler).__name__ if scaler else 'None (pipeline handles scaling)'}")
-        logger.info(f"Selector type: {type(selector).__name__ if selector else 'None (pipeline handles selection)'}")
-        logger.info("=" * 60)
-
-        return model, scaler, selector, feature_names
-
+        logger.info("Initializing Vietnamese Transcriber...")
+        vietnamese_transcriber = VietnameseTranscriber()
+        logger.info("Vietnamese Transcriber initialized successfully")
+        return True
     except Exception as e:
-        logger.error("=" * 60)
-        logger.error("FAILED TO LOAD MODEL BUNDLE")
-        logger.error("=" * 60)
-        logger.error(f"Error: {e}")
-        logger.error("=" * 60)
-        import traceback
-        logger.error(traceback.format_exc())
-        return None, None, None, None
-
-def initialize_model():
-    """Initialize cognitive assessment model with error handling"""
-    global cognitive_model, feature_names, vietnamese_transcriber, model_scaler, model_selector
-    
-    # PRIORITY: Load model bundle first
-    model, scaler, selector, fnames = load_model_bundle()
-    
-    if model is None:
-        logger.error("Failed to load model bundle")
-        logger.warning("Falling back to training new model (not recommended)")
-        
-        # Fallback: Try to train new model (legacy behavior)
-        if CognitiveAssessmentModel:
-            try:
-                logger.info("Attempting to train new model...")
-                cognitive_model, feature_names, best_name = train_five_feature_model()
-                if cognitive_model is None:
-                    logger.error("Failed to train five-feature model")
-                    return False
-                logger.info("Five-feature cognitive model trained successfully")
-                logger.info(f"Features: {feature_names}")
-                logger.info(f"Best model: {best_name}")
-            except Exception as e:
-                logger.error(f"Failed to train model: {e}")
-                return False
-        else:
-            logger.error("CognitiveAssessmentModel not available")
-            return False
-    else:
-        # Model bundle loaded successfully
-        cognitive_model = model
-        model_scaler = scaler
-        model_selector = selector
-        feature_names = fnames
-    
-    # Initialize Vietnamese transcriber
-    if VietnameseTranscriber:
-        try:
-            logger.info("Initializing Vietnamese Transcriber...")
-            vietnamese_transcriber = VietnameseTranscriber()
-            logger.info("Vietnamese Transcriber initialized successfully")
-        except Exception as e:
-            logger.warning(f"Failed to initialize Vietnamese Transcriber: {e}")
-            logger.info("Will use fallback transcription method")
-            vietnamese_transcriber = None
-    else:
-        logger.warning("VietnameseTranscriber class not available")
-        vietnamese_transcriber = None
-    
-    return True
+        logger.error(f"Failed to initialize Vietnamese Transcriber: {e}")
+        raise  # If import succeeded but init failed, raise error
 
 def extract_audio_features(audio_path: str) -> dict:
     """Extract acoustic features including required metrics: speech_rate, number of utterances, avg pause, avg pitch, avg energy"""
@@ -2198,101 +1909,6 @@ def _correct_gpt_response(partial_result, word_count, is_short, language):
 
 from typing import Tuple, List, Optional
 
-def train_five_feature_model() -> Tuple[Optional[object], List[str], str]:
-    """Train and select the best model on five acoustic features using CV.
-    Uses real dataset if available; otherwise, falls back to robust synthetic data.
-    Returns (model, feature_names, best_model_name).
-    """
-    try:
-        import numpy as np
-        from sklearn.linear_model import Ridge, LinearRegression
-        from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
-        from sklearn.pipeline import make_pipeline
-        from sklearn.preprocessing import StandardScaler
-        from sklearn.model_selection import cross_val_score
-    except Exception as e:
-        logger.error(f"❌ Scikit-learn dependency missing: {e}")
-        return None, [], ''
-
-    feature_order = ['speech_rate', 'number_utterances', 'silence_mean', 'pitch_mean']
-
-    # Attempt to build a real dataset from existing CSVs if available
-    X_real = None
-    y_real = None
-    try:
-        from cognitive_assessment_ml import EnhancedMultimodalCognitiveModel as _CAM
-        loader = _CAM()
-        # Try to load data if the method exists
-        if hasattr(loader, 'load_and_process_data'):
-            main_data, _ = loader.load_and_process_data()
-            if main_data is not None and not main_data.empty:
-                if hasattr(loader, 'extract_acoustic_features'):
-                    processed, _ = loader.extract_acoustic_features(main_data)
-                    # Ensure required columns exist; skip if missing too many
-                    if all(col in processed.columns for col in feature_order) and 'mmse' in processed.columns:
-                        df = processed.dropna(subset=feature_order + ['mmse']).copy()
-                        if len(df) >= 30:
-                            X_real = df[feature_order].values
-                            mmse = df['mmse'].values.astype(float)
-                            # Keep original MMSE scale (0-30) instead of converting to 1-10
-                            y_real = np.clip(mmse, 0.0, 30.0)
-    except Exception as e:
-        logger.warning(f"⚠️ Failed to build real dataset for five-feature model: {e}")
-
-    if X_real is None or y_real is None:
-        # Fallback to synthetic robust generation
-        rng = np.random.default_rng(123)
-        n_samples = 1200
-        speech_rate = rng.uniform(1.0, 4.0, n_samples)
-        number_utterances = rng.integers(1, 40, n_samples).astype(float)
-        silence_mean = rng.uniform(0.0, 1.8, n_samples)
-        pitch_mean = rng.uniform(110.0, 280.0, n_samples)
-        X_real = np.column_stack([speech_rate, number_utterances, silence_mean, pitch_mean])
-        # Generate synthetic data on MMSE scale (0-30) directly - more conservative scaling
-        y_real = (
-            18.0  # Base MMSE score (higher baseline for healthier population)
-            + 2.5 * (speech_rate - 2.5)  # Speech rate impact (reduced)
-            + 0.08 * (number_utterances - 15)  # Utterances impact (reduced)
-            - 2.0 * (silence_mean - 0.5)  # Silence impact (reduced)
-            + 0.006 * (220.0 - pitch_mean)  # Pitch impact (reduced)
-            + rng.normal(0, 0.8, n_samples)  # Noise (reduced)
-        )
-        # Strict clipping to ensure no values exceed 30
-        y_real = np.clip(y_real, 0.0, 30.0)
-
-    candidates = {
-        'Ridge': make_pipeline(StandardScaler(), Ridge(alpha=1.0)),
-        'LinearRegression': make_pipeline(StandardScaler(), LinearRegression()),
-        'GradientBoosting': GradientBoostingRegressor(random_state=42),
-        'RandomForest': RandomForestRegressor(n_estimators=200, random_state=42)
-    }
-
-    best_name = ''
-    best_score = None
-    best_model = None
-    for name, model in candidates.items():
-        try:
-            scores = cross_val_score(model, X_real, y_real, cv=5, scoring='neg_mean_squared_error')
-            mse = -scores.mean()
-            logger.info(f"🔎 CV - {name}: MSE={mse:.3f}")
-            if best_score is None or mse < best_score:
-                best_score = mse
-                best_name = name
-                best_model = model
-        except Exception as e:
-            logger.warning(f"⚠️ CV failed for {name}: {e}")
-
-    if best_model is None:
-        logger.error("❌ No model succeeded during CV")
-        return None, [], ''
-
-    best_model.fit(X_real, y_real)
-    try:
-        setattr(best_model, 'best_model_name', best_name)
-    except Exception:
-        pass
-    return best_model, feature_order, best_name
-
 # =============================================================================
 # VALIDATION FUNCTIONS (PRIORITY 4)
 # =============================================================================
@@ -2655,109 +2271,10 @@ def predict_cognitive_score(audio_features: dict, transcript: str = None, audio_
             logger.error(f"❌ MCI modules prediction failed: {e}")
             # Fall through to legacy method
     
-    # FALLBACK: Legacy ML model (if MCI modules not available)
-    # Only use if we have compatible features
-    logger.warning("⚠️ MCI modules not available, checking legacy ML model compatibility...")
-    global cognitive_model, feature_names, model_scaler, model_selector
-    
-    if not cognitive_model or not feature_names:
-        error_msg = "Neither MCI modules nor legacy ML model available."
-        logger.error(error_msg)
-        # Return default instead of raising error
-        return {
-            'predicted_score': 20.0,
-            'confidence': 0.5,
-            'model_used': 'fallback (no model available)',
-            'note': 'No prediction model available'
-        }
-    
-    # Check if we have compatible features for legacy model
-    # Legacy model requires specific feature names, not generic ones
-    missing_legacy_features = [f for f in feature_names if f not in audio_features and f.startswith('feature_')]
-    if missing_legacy_features and len(missing_legacy_features) > 5:
-        logger.warning(f"⚠️ Legacy model requires {len(missing_legacy_features)} missing features, skipping legacy model")
-        return {
-            'predicted_score': 20.0,
-            'confidence': 0.5,
-            'model_used': 'fallback (incompatible features)',
-            'note': f'Legacy model requires {len(missing_legacy_features)} missing features'
-        }
-    
-    try:
-        # Legacy pipeline - fill missing features
-        safe_features = _fill_missing_features(audio_features, feature_names)
-        feature_vector = prepare_feature_vector(safe_features, feature_names)
-        processed_vector = feature_vector
-        
-        if model_selector is not None:
-            processed_vector = model_selector.transform(processed_vector)
-        if model_scaler is not None:
-            processed_vector = model_scaler.transform(processed_vector)
-        
-        raw_prediction = cognitive_model.predict(processed_vector)
-        
-        # Handle different prediction output formats
-        if isinstance(raw_prediction, np.ndarray):
-            if len(raw_prediction.shape) > 0:
-                predicted_score = float(raw_prediction[0])
-            else:
-                predicted_score = float(raw_prediction)
-        else:
-            predicted_score = float(raw_prediction)
-        
-        logger.info(f"Raw prediction: {predicted_score:.4f}")
-        
-        # Step 5: Validate prediction output
-        logger.info("Step 5: Validating prediction...")
-        predicted_score = validate_prediction(predicted_score)
-        logger.info(f"Validated prediction: {predicted_score:.2f}")
-        
-        # Step 6: Calculate confidence (if available)
-        confidence = 0.85  # Default confidence for regression models
-        if hasattr(cognitive_model, 'predict_proba'):
-            try:
-                proba = cognitive_model.predict_proba(processed_vector)
-                if proba is not None and len(proba) > 0:
-                    confidence = float(np.max(proba[0]))
-            except Exception as e:
-                logger.warning(f"Could not calculate probability-based confidence: {e}")
-        
-        # Get model name
-        model_name = getattr(cognitive_model, 'best_model_name', None)
-        if not model_name:
-            model_name = type(cognitive_model).__name__
-        
-        logger.info("=" * 60)
-        logger.info("PREDICTION COMPLETE")
-        logger.info("=" * 60)
-        logger.info(f"Predicted MMSE: {predicted_score:.2f}/30")
-        logger.info(f"Confidence: {confidence:.2f}")
-        logger.info(f"Model: {model_name}")
-        logger.info("=" * 60)
-        
-        result = {
-            'predicted_score': predicted_score,
-            'confidence': float(confidence),
-            'model_used': model_name
-        }
-        
-        return result
-        
-    except ValueError as e:
-        # Re-raise validation errors
-        logger.error(f"Validation error in prediction: {e}")
-        raise
-    except Exception as e:
-        # Log full error details
-        logger.error("=" * 60)
-        logger.error("PREDICTION FAILED")
-        logger.error("=" * 60)
-        logger.error(f"Error: {e}")
-        import traceback
-        logger.error(traceback.format_exc())
-        logger.error("=" * 60)
-        # PRIORITY 5: Raise error instead of returning default
-        raise RuntimeError(f"Prediction failed: {str(e)}") from e
+    # If MCI modules not available, raise error (no fallback to old pipeline)
+    error_msg = "MCI modules not available. Please ensure modules are properly installed."
+    logger.error(error_msg)
+    raise RuntimeError(error_msg)
 
 def transcribe_audio(audio_path: str, question: str = None) -> dict:
     """Transcribe audio using Vietnamese transcriber (Gemini-first)."""
@@ -2797,7 +2314,7 @@ def health_check():
     """Health check endpoint"""
     # Get MCI service status
     mci_status = {}
-    if mci_service is not None:
+    if MCI_MODULES_AVAILABLE:
         try:
             status = mci_service.get_status()
             mci_status = {
@@ -2814,10 +2331,6 @@ def health_check():
     return jsonify({
         'status': 'healthy',
         'timestamp': datetime.now().isoformat(),
-        'model_loaded': cognitive_model is not None,
-        'feature_count': len(feature_names) if feature_names else 0,
-        'model_bundle': str((Path(__file__).resolve().parent.parent / "models").resolve()),
-        'mmse_pipeline_available': mmse_pipeline is not None,
         'mci_service': mci_status,
         'gemini_available': bool(gemini_api_key),
         'openai_available': openai_client is not None,
@@ -2850,7 +2363,7 @@ def mci_status():
     - mci_predictor: MCI prediction and MMSE estimation
     """
     try:
-        if mci_service is None:
+        if not MCI_MODULES_AVAILABLE:
             return jsonify({
                 'success': False,
                 'available': False,
@@ -2909,7 +2422,7 @@ def mci_analyze():
         - linguistic_features: Extracted linguistic features count
     """
     try:
-        if mci_service is None:
+        if not MCI_MODULES_AVAILABLE:
             return jsonify({
                 'success': False,
                 'error': 'MCI service not available. Please check module installation.'
@@ -3019,10 +2532,10 @@ def mci_acoustic_features():
         - key_features: Most important features for MCI detection
     """
     try:
-        if mci_service is None or mci_service.acoustic_analyzer is None:
+        if not MCI_MODULES_AVAILABLE:
             return jsonify({
                 'success': False,
-                'error': 'Acoustic analyzer not available'
+                'error': 'MCI modules not available'
             }), 503
         
         # Get audio file
@@ -3097,10 +2610,10 @@ def mci_linguistic_features():
         - key_features: Most important features for MCI detection
     """
     try:
-        if mci_service is None or mci_service.linguistic_analyzer is None:
+        if not MCI_MODULES_AVAILABLE:
             return jsonify({
                 'success': False,
-                'error': 'Linguistic analyzer not available'
+                'error': 'MCI modules not available'
             }), 503
         
         # Get transcript from JSON or form data
@@ -3171,10 +2684,10 @@ def mci_predict():
         - recommendations: Clinical recommendations
     """
     try:
-        if mci_service is None or mci_service.predictor is None:
+        if not MCI_MODULES_AVAILABLE:
             return jsonify({
                 'success': False,
-                'error': 'MCI predictor not available'
+                'error': 'MCI modules not available'
             }), 503
         
         if not request.is_json:
@@ -3229,7 +2742,7 @@ def mci_batch_analyze():
         - summary: Aggregate statistics
     """
     try:
-        if mci_service is None:
+        if not MCI_MODULES_AVAILABLE:
             return jsonify({
                 'success': False,
                 'error': 'MCI service not available'
@@ -3757,17 +3270,7 @@ def assess_cognitive():
                 else:
                     logger.error(f"❌ GPT evaluation is not dict before logging: {type(gpt_evaluation)}")
             
-            # Step 5: Speech-Based MMSE Support (AI assistance)
-            logger.info("🎙️ STEP 5: SPEECH-BASED MMSE SUPPORT")
-            speech_support_result = None
-            
-            if SPEECH_MMSE_AVAILABLE and audio_features:
-                try:
-                    speech_support_result = get_speech_mmse_support(audio_features)
-                    logger.info(f"🤖 Speech-Based MMSE Support: {speech_support_result['ensemble_prediction']:.1f}/30 (confidence: {speech_support_result['confidence']:.1%})")
-                except Exception as e:
-                    logger.error(f"❌ Speech-Based MMSE Support failed: {e}")
-                    speech_support_result = None
+            # Step 5: Speech-Based MMSE Support removed (old pipeline)
             
             # Step 6: Legacy ML prediction (for compatibility)
             ml_score = ml_prediction.get('predicted_score', 15.0)
@@ -4769,10 +4272,9 @@ def evaluate_transcript():
 def get_status():
     """Get system status"""
     return jsonify({
-        'model_loaded': cognitive_model is not None,
+        'mci_modules_available': MCI_MODULES_AVAILABLE,
         'openai_available': openai_client is not None,
         'transcriber_available': vietnamese_transcriber is not None,
-        'feature_names': feature_names if feature_names else [],
         'vi_asr_model': vi_asr_model,
         'transcription_enabled': os.getenv('ENABLE_PAID_TRANSCRIPTION', 'true').lower() == 'true',
         'transcription_budget': os.getenv('TRANSCRIPTION_BUDGET_LIMIT', '5.00'),
@@ -5207,34 +4709,27 @@ queue_thread = threading.Thread(target=queue_worker, daemon=True, name='queue_wo
 queue_thread.start()
 logger.info("🎯 Queue worker thread started")
 
-# Initialize models when app is imported (PRIORITY 7)
+# Initialize Vietnamese transcriber when app is imported
+logger.info("=" * 60)
+logger.info("STARTING APPLICATION")
+logger.info("=" * 60)
+
 try:
+    initialize_transcriber()
     logger.info("=" * 60)
-    logger.info("STARTING APPLICATION")
+    logger.info("APPLICATION STARTED")
     logger.info("=" * 60)
-    logger.info("Auto-initializing models...")
-    
-    if initialize_model():
-        logger.info("=" * 60)
-        logger.info("MODELS INITIALIZED SUCCESSFULLY")
-        logger.info("=" * 60)
-    else:
-        logger.error("=" * 60)
-        logger.error("MODEL INITIALIZATION FAILED")
-        logger.error("=" * 60)
-        logger.error("Server starting without ML capabilities")
-        logger.error("Some endpoints may not work properly")
-        logger.error("=" * 60)
+    logger.info("Server is ready - Using new pipeline (Modules + GPT + ASR + Fusion)")
+    logger.info("=" * 60)
 except Exception as e:
-    logger.error("=" * 60)
-    logger.error("AUTO-INITIALIZATION FAILED")
-    logger.error("=" * 60)
-    logger.error(f"Error: {e}")
+    logger.warning("=" * 60)
+    logger.warning("TRANSCRIBER INITIALIZATION FAILED")
+    logger.warning("=" * 60)
+    logger.warning(f"Error: {e}")
     import traceback
-    logger.error(traceback.format_exc())
-    logger.error("=" * 60)
-    logger.error("App will continue with limited functionality")
-    logger.error("=" * 60)
+    logger.debug(traceback.format_exc())
+    logger.warning("Server will continue but transcription may not work")
+    logger.warning("=" * 60)
 
 # New API endpoints for queued assessments
 @app.route('/api/assess-queue', methods=['POST'])
@@ -6359,12 +5854,6 @@ def assess_mmse():
     - metadata: additional JSON metadata (optional)
     """
     try:
-        if mmse_pipeline is None:
-            return jsonify({
-                'success': False,
-                'error': 'MMSE pipeline not available'
-            }), 503
-
         # Get uploaded file
         if 'audio' not in request.files:
             return jsonify({
@@ -6410,25 +5899,12 @@ def assess_mmse():
             audio_file.save(tmp_file.name)
             tmp_path = tmp_file.name
 
-        try:
-            # Process audio
-            result = mmse_pipeline.process_audio_file(
-                tmp_path,
-                demographics=demographics,
-                assessment_metadata=metadata
-            )
-
-            # Clean up temp file
-            import os
-            os.unlink(tmp_path)
-
-            return jsonify(result)
-
-        except Exception as e:
-            # Clean up temp file
-            import os
-            os.unlink(tmp_path)
-            raise e
+        # Old pipeline removed - use new pipeline (Modules + GPT + ASR + Fusion)
+        return jsonify({
+            'success': False,
+            'error': 'This endpoint has been deprecated. Please use the new pipeline with Modules + GPT + ASR + Fusion.',
+            'timestamp': datetime.now().isoformat()
+        }), 410  # 410 Gone
 
     except Exception as e:
         logger.error(f"❌ MMSE assessment failed: {e}")
@@ -6438,32 +5914,7 @@ def assess_mmse():
             'timestamp': datetime.now().isoformat()
         }), 500
 
-@app.route('/api/mmse/performance', methods=['GET'])
-def get_mmse_performance():
-    """
-    Get MMSE pipeline performance statistics
-    """
-    try:
-        if mmse_pipeline is None:
-            return jsonify({
-                'success': False,
-                'error': 'MMSE pipeline not available'
-            }), 503
-
-        stats = mmse_pipeline.get_performance_stats()
-
-        return jsonify({
-            'success': True,
-            'performance_stats': stats,
-            'timestamp': datetime.now().isoformat()
-        })
-
-    except Exception as e:
-        logger.error(f"❌ Performance stats retrieval failed: {e}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+# Old MMSE pipeline endpoints removed - use new pipeline (Modules + GPT + ASR + Fusion)
 
 @app.route('/results', methods=['GET'])
 def results_redirect():
