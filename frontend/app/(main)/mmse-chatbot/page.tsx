@@ -159,7 +159,7 @@ export default function MMSEChatbotPage() {
   
   // Session state
   const [session, setSession] = useState<SessionState | null>(null);
-  const [mmseData, setMmseData] = useState<{ domains: MMSEDomain[] } | null>(null);
+  const [mmseData, setMmseData] = useState<{ domains: MMSEDomain[]; metadata?: any } | null>(null);
   
   // Chat state
   const [inputText, setInputText] = useState("");
