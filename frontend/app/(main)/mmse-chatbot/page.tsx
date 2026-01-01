@@ -159,7 +159,8 @@ export default function MMSEChatbotPage() {
   
   // Session state
   const [session, setSession] = useState<SessionState | null>(null);
-  const [mmseData, setMmseData] = useState<{ domains: MMSEDomain[]; metadata?: any } | null>(null);
+  const [mmseData, setMmseData] = useState<{ domains: MMSEDomain[] } | null>(null);
+  const [isLoadingQuestions, setIsLoadingQuestions] = useState(true);
   
   // Chat state
   const [inputText, setInputText] = useState("");
@@ -211,38 +212,14 @@ export default function MMSEChatbotPage() {
   // FUNCTIONS
   // ============================================
   const loadMMSEQuestions = async () => {
-    try {
-      console.log(`📡 Loading MMSE questions from: ${API_BASE_URL}/api/mmse/chatbot/questions`);
-      const response = await fetch(`${API_BASE_URL}/api/mmse/chatbot/questions`, {
-        method: "GET",
-        headers: {
-          "Accept": "application/json",
-        },
-        // Add timeout
-        signal: AbortSignal.timeout(10000), // 10 second timeout
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        console.log("✅ MMSE questions loaded from backend:", data);
-        setMmseData(data);
-        return;
-      } else {
-        console.warn(`⚠️ Backend returned ${response.status}, using fallback`);
-      }
-    } catch (error: any) {
-      if (error.name === 'AbortError') {
-        console.warn("⏰ Request timeout, using fallback");
-      } else {
-        console.warn("⚠️ Could not load MMSE questions from backend, using fallback:", error.message);
-      }
-    }
+    setIsLoadingQuestions(true);
     
-    // Fallback: Load from local JSON
+    // Strategy: Try JSON first (faster, more reliable), then backend
+    // JSON fallback should work on Vercel since it's in public folder
     try {
-      console.log("📄 Loading MMSE questions from local JSON fallback...");
+      console.log("📄 Loading MMSE questions from local JSON...");
       const localData = await fetch("/mmse_audio_questions_standardized.json", {
-        signal: AbortSignal.timeout(5000),
+        signal: AbortSignal.timeout(3000), // 3 second timeout
       });
       
       if (localData.ok) {
@@ -252,12 +229,68 @@ export default function MMSEChatbotPage() {
           domains: json.mmse_vietnamese_chatbot?.domains || [],
           metadata: json.mmse_vietnamese_chatbot?.metadata || {},
         });
+        setIsLoadingQuestions(false);
+        return;
       } else {
-        console.error("❌ Failed to load local JSON:", localData.status);
+        console.warn(`⚠️ Local JSON returned ${localData.status}, trying backend...`);
       }
     } catch (fallbackError: any) {
-      console.error("❌ Failed to load MMSE questions from both backend and fallback:", fallbackError);
+      if (fallbackError.name !== 'AbortError') {
+        console.warn("⚠️ Could not load local JSON, trying backend:", fallbackError.message);
+      }
     }
+    
+    // Fallback: Try backend
+    try {
+      console.log(`📡 Loading MMSE questions from: ${API_BASE_URL}/api/mmse/chatbot/questions`);
+      const response = await fetch(`${API_BASE_URL}/api/mmse/chatbot/questions`, {
+        method: "GET",
+        headers: {
+          "Accept": "application/json",
+        },
+        signal: AbortSignal.timeout(5000), // 5 second timeout
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        console.log("✅ MMSE questions loaded from backend:", data);
+        setMmseData(data);
+        setIsLoadingQuestions(false);
+        return;
+      } else {
+        console.warn(`⚠️ Backend returned ${response.status}`);
+      }
+    } catch (error: any) {
+      if (error.name === 'AbortError') {
+        console.warn("⏰ Backend request timeout");
+      } else {
+        console.warn("⚠️ Could not load MMSE questions from backend:", error.message);
+      }
+    }
+    
+    // If both failed, try to load JSON with absolute path
+    try {
+      console.log("📄 Retrying JSON with absolute path...");
+      const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
+      const localData = await fetch(`${baseUrl}/mmse_audio_questions_standardized.json`, {
+        signal: AbortSignal.timeout(3000),
+      });
+      
+      if (localData.ok) {
+        const json = await localData.json();
+        console.log("✅ MMSE questions loaded from JSON (retry)");
+        setMmseData({ 
+          domains: json.mmse_vietnamese_chatbot?.domains || [],
+          metadata: json.mmse_vietnamese_chatbot?.metadata || {},
+        });
+        setIsLoadingQuestions(false);
+        return;
+      }
+    } catch (retryError) {
+      console.error("❌ All attempts to load MMSE questions failed");
+    }
+    
+    setIsLoadingQuestions(false);
   };
 
   const scrollToBottom = () => {
@@ -1421,16 +1454,26 @@ export default function MMSEChatbotPage() {
                 {/* Start Button */}
                 <Button
                   onClick={startChat}
-                  disabled={!mmseData}
-                  className="w-full h-14 mt-8 text-lg font-bold rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-lg"
+                  disabled={!mmseData || isLoadingQuestions}
+                  className="w-full h-14 mt-8 text-lg font-bold rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {!mmseData ? (
-                    <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                  {isLoadingQuestions || !mmseData ? (
+                    <>
+                      <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                      {isLoadingQuestions ? "Đang tải..." : "Đang khởi tạo..."}
+                    </>
                   ) : (
-                    <MessageCircle className="w-5 h-5 mr-2" />
+                    <>
+                      <MessageCircle className="w-5 h-5 mr-2" />
+                      Bắt đầu trò chuyện
+                    </>
                   )}
-                  Bắt đầu trò chuyện
                 </Button>
+                {!isLoadingQuestions && !mmseData && (
+                  <p className="text-sm text-red-500 mt-2 text-center">
+                    ⚠️ Không thể tải dữ liệu. Vui lòng tải lại trang.
+                  </p>
+                )}
               </motion.div>
 
               {/* Tips */}

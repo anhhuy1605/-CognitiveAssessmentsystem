@@ -55,11 +55,15 @@ def preprocess_audio_for_analysis(input_file: str) -> str:
     ]
     
     try:
+        # Use encoding='utf-8' with errors='ignore' to handle Vietnamese characters in file paths
+        # This prevents UnicodeDecodeError when ffmpeg outputs contain non-ASCII characters
         result = subprocess.run(
             cmd,
             check=True,
             capture_output=True,
             text=True,
+            encoding='utf-8',
+            errors='ignore',  # Ignore encoding errors in output (don't need to parse stderr anyway)
             timeout=30  # 30 second timeout
         )
         logger.info(f"✅ Audio converted: {input_file} → {output_file}")
