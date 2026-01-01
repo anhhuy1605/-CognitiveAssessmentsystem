@@ -169,6 +169,7 @@ models/
 *.json
 !package*.json
 !questions.json
+!mmse_audio_questions_standardized.json
 !*config*.json
 *.xlsx
 *.xls

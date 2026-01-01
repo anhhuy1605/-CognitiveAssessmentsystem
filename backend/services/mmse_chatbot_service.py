@@ -143,11 +143,30 @@ class MMSEChatbotService:
         except Exception as e:
             logger.error(f"❌ Failed to initialize scoring service: {e}")
             self.scoring_service = None
-        self.questions_path = questions_path or os.path.join(
-            os.path.dirname(__file__),
-            "..",
-            "mmse_audio_questions_standardized.json"
-        )
+        if questions_path is None:
+            # Try to find file in multiple locations
+            possible_paths = [
+                os.path.join(os.path.dirname(__file__), "..", "mmse_audio_questions_standardized.json"),
+                os.path.join(os.path.dirname(__file__), "..", "..", "mmse_audio_questions_standardized.json"),
+                os.path.join(os.path.dirname(__file__), "mmse_audio_questions_standardized.json"),
+                "/app/mmse_audio_questions_standardized.json",
+                "/app/backend/mmse_audio_questions_standardized.json",
+            ]
+            for path in possible_paths:
+                if os.path.exists(path):
+                    questions_path = path
+                    logger.info(f"✅ Found questions file at: {questions_path}")
+                    break
+            else:
+                # Default fallback
+                questions_path = os.path.join(
+                    os.path.dirname(__file__),
+                    "..",
+                    "mmse_audio_questions_standardized.json"
+                )
+                logger.warning(f"⚠️ Questions file not found in any expected location, using default: {questions_path}")
+        
+        self.questions_path = questions_path
         self.questions_data = self._load_questions()
         self.sessions: Dict[str, SessionState] = {}
         

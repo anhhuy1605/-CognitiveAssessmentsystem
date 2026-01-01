@@ -33,6 +33,32 @@ mmse_chatbot_bp = Blueprint('mmse_chatbot', __name__, url_prefix='/api/mmse/chat
 chatbot_service = None
 transcriber = None
 
+def find_mmse_audio_questions_path():
+    """
+    Find mmse_audio_questions_standardized.json file in multiple possible locations.
+    Returns the path if found, None otherwise.
+    """
+    possible_paths = [
+        # Path 1: backend/mmse_audio_questions_standardized.json (relative to services/)
+        os.path.join(os.path.dirname(__file__), '..', 'mmse_audio_questions_standardized.json'),
+        # Path 2: backend/mmse_audio_questions_standardized.json (relative to project root)
+        os.path.join(os.path.dirname(__file__), '..', '..', 'mmse_audio_questions_standardized.json'),
+        # Path 3: mmse_audio_questions_standardized.json in services directory
+        os.path.join(os.path.dirname(__file__), 'mmse_audio_questions_standardized.json'),
+        # Path 4: Absolute path in deployment
+        '/app/mmse_audio_questions_standardized.json',
+        # Path 5: In backend directory in deployment
+        '/app/backend/mmse_audio_questions_standardized.json',
+    ]
+    
+    for path in possible_paths:
+        if os.path.exists(path):
+            logger.debug(f"✅ Found mmse_audio_questions_standardized.json at: {path}")
+            return path
+    
+    logger.warning(f"⚠️ mmse_audio_questions_standardized.json not found. Tried paths: {possible_paths}")
+    return None
+
 def init_services():
     """Initialize services lazily"""
     global chatbot_service, transcriber
@@ -67,31 +93,31 @@ def get_questions():
     """Get MMSE questions for chatbot"""
     try:
         # Load questions from JSON file
-        questions_path = os.path.join(
-            os.path.dirname(__file__), 
-            '..', 
-            'mmse_audio_questions_standardized.json'
-        )
+        questions_path = find_mmse_audio_questions_path()
         
-        if os.path.exists(questions_path):
-            with open(questions_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            
-            # Extract domains from the JSON structure
-            mmse_data = data.get('mmse_vietnamese_chatbot', {})
-            domains = mmse_data.get('domains', [])
-            
-            return jsonify({
-                'success': True,
-                'domains': domains,
-                'metadata': mmse_data.get('metadata', {}),
-                'greeting_variable': mmse_data.get('greeting_variable', '{greeting}')
-            })
-        else:
+        if not questions_path:
+            error_msg = "Questions file not found. Please ensure mmse_audio_questions_standardized.json exists in backend/ directory."
+            logger.error(f"❌ {error_msg}")
             return jsonify({
                 'success': False,
-                'error': 'Questions file not found'
+                'error': error_msg
             }), 404
+        
+        with open(questions_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        
+        # Extract domains from the JSON structure
+        mmse_data = data.get('mmse_vietnamese_chatbot', {})
+        domains = mmse_data.get('domains', [])
+        
+        logger.info(f"✅ Loaded {len(domains)} domains from {questions_path}")
+        
+        return jsonify({
+            'success': True,
+            'domains': domains,
+            'metadata': mmse_data.get('metadata', {}),
+            'greeting_variable': mmse_data.get('greeting_variable', '{greeting}')
+        })
             
     except Exception as e:
         logger.error(f"Error loading questions: {e}")

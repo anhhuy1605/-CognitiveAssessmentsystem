@@ -1,0 +1,814 @@
+{
+  "metadata": {
+    "version": "2.1_CORRECTED",
+    "date_updated": "2024-12-29",
+    "changes_from_v2.0": [
+      "Fixed adjusted score formula (age penalty applied correctly)",
+      "Rescaled cutoffs for 35-point scale",
+      "Changed Attention test: Serial 7s with education-adjusted cutoffs",
+      "Fixed Clock Drawing scoring (0-3 points from Shulman 6-point)",
+      "Removed backward spelling (not equivalent)",
+      "Added education bonus to adjustment formula",
+      "Fixed greeting variables and natural conversation flow",
+      "Corrected all placeholders and feedback messages"
+    ]
+  },
+
+  "scoring_system": {
+    "total_points": 35,
+    "adjustment_formula": {
+      "formula": "Adjusted_Score = Raw_Score - Age_Penalty + Education_Bonus",
+      "citation": "Modified from Murden et al. (1991) and Vietnamese JINS 2025 study",
+      
+      "age_penalty": {
+        "formula": "0.2 × max(0, age - 60)",
+        "citation": "Based on Vietnamese normative data showing linear decline ~0.2 points/year after age 60 (JINS 2025)",
+        "examples": {
+          "age_55": 0,
+          "age_65": 1.0,
+          "age_72": 2.4,
+          "age_80": 4.0
+        }
+      },
+      
+      "education_bonus": {
+        "rationale": "Compensates for lower baseline due to education, not a 'boost'",
+        "citation": "Murden et al. (1991) - Education adjustment essential for fair assessment",
+        "values": {
+          "low_education_0_9_years": 0,
+          "medium_education_10_12_years": 1,
+          "high_education_13_plus_years": 2
+        }
+      }
+    },
+    
+    "cutoffs_35_point_scale": {
+      "note": "Rescaled from 30-point MMSE cutoffs (multiply by 35/30 = 1.167)",
+      "citation": "Original cutoffs from Vietnamese study (2013) + Murden (1991), rescaled for 35-point",
+      
+      "low_education": {
+        "label": "≤9 năm học",
+        "normal": "≥23",
+        "mci": "20-22",
+        "dementia": "<20",
+        "original_30pt": "≥20 (normal), 17-19 (MCI), <17 (dementia)"
+      },
+      "medium_education": {
+        "label": "10-12 năm học",
+        "normal": "≥28",
+        "mci": "24-27",
+        "dementia": "<24",
+        "original_30pt": "≥24 (normal), 21-23 (MCI), <21 (dementia)"
+      },
+      "high_education": {
+        "label": ">12 năm học",
+        "normal": "≥31",
+        "mci": "28-30",
+        "dementia": "<28",
+        "original_30pt": "≥27 (normal), 24-26 (MCI), <24 (dementia)"
+      }
+    },
+    
+    "risk_classification_algorithm": {
+      "step_1": "Calculate Raw_Score (0-35)",
+      "step_2": "Calculate Age_Penalty = 0.2 × max(0, age - 60)",
+      "step_3": "Determine Education_Bonus (0, 1, or 2)",
+      "step_4": "Adjusted_Score = Raw_Score - Age_Penalty + Education_Bonus",
+      "step_5": "Compare Adjusted_Score to education-specific cutoffs",
+      "step_6": "Classify: Ổn / Nguy cơ nhẹ / Nguy cơ cao"
+    },
+    
+    "classification_examples": {
+      "example_1": {
+        "age": 72,
+        "education_years": 16,
+        "raw_score": 26,
+        "age_penalty": 2.4,
+        "education_bonus": 2,
+        "adjusted_score": 25.6,
+        "education_group": "high (>12 years)",
+        "cutoff_normal": 31,
+        "classification": "Nguy cơ cao (25.6 < 28, in dementia range)",
+        "note": "CORRECTED from v2.0 which incorrectly added age penalty"
+      },
+      "example_2": {
+        "age": 68,
+        "education_years": 8,
+        "raw_score": 22,
+        "age_penalty": 1.6,
+        "education_bonus": 0,
+        "adjusted_score": 20.4,
+        "education_group": "low (≤9 years)",
+        "cutoff_normal": 23,
+        "classification": "Nguy cơ nhẹ (20.4 in MCI range 20-22)"
+      }
+    }
+  },
+
+  "questions": {
+    "greeting": {
+      "domain": "introduction",
+      "category": "Chào hỏi và giới thiệu",
+      "messages": [
+        "Xin chào {pronoun}! Tôi là trợ lý ảo, sẽ giúp {pronoun} làm bài kiểm tra sức khỏe nhận thức hôm nay.",
+        "Bài kiểm tra này gồm nhiều câu hỏi về thời gian, địa điểm, trí nhớ, và một số câu tính toán đơn giản.",
+        "Toàn bộ bài kiểm tra sẽ mất khoảng 15-20 phút. {Pronoun} cứ thư giãn và trả lời tự nhiên nhé!",
+        "Chúng ta bắt đầu nhé {pronoun}!"
+      ],
+      "pronoun_mapping": {
+        "male": "Ông",
+        "female": "Bà",
+        "default": "Bạn"
+      },
+      "note": "Use appropriate pronoun based on user gender throughout conversation"
+    },
+
+    "1_orientation": {
+      "domain": "orientation",
+      "total_points": 10,
+      "questions": {
+        "ori_time_01": {
+          "question": "Đầu tiên, {pronoun} cho tôi biết hôm nay là thứ mấy nhé?",
+          "points": 1,
+          "correct_answer": "dynamic_current_weekday",
+          "validation": {
+            "sunday": ["chủ nhật", "chúa nhật", "cn"],
+            "monday": ["thứ hai", "thứ 2", "t2"],
+            "tuesday": ["thứ ba", "thứ 3", "t3"],
+            "wednesday": ["thứ tư", "thứ 4", "t4"],
+            "thursday": ["thứ năm", "thứ 5", "t5"],
+            "friday": ["thứ sáu", "thứ 6", "t6"],
+            "saturday": ["thứ bảy", "thứ 7", "t7"]
+          },
+          "feedback": {
+            "correct": "Đúng rồi {pronoun}! Hôm nay là {correct_answer}.",
+            "incorrect": "Hôm nay là {correct_answer} nhé {pronoun}."
+          }
+        },
+        
+        "ori_time_02": {
+          "question": "Tiếp theo, {pronoun} có nhớ hôm nay là ngày bao nhiêu không?",
+          "points": 1,
+          "correct_answer": "dynamic_current_date",
+          "tolerance": "±1 day",
+          "feedback": {
+            "correct": "Chính xác! Ngày {correct_answer}.",
+            "incorrect": "Hôm nay là ngày {correct_answer} nhé {pronoun}."
+          }
+        },
+        
+        "ori_time_03": {
+          "question": "Vậy tháng này là tháng mấy nhỉ?",
+          "points": 1,
+          "correct_answer": "dynamic_current_month",
+          "validation": ["tháng 1", "tháng 2", "tháng 3", "tháng 4", "tháng 5", "tháng 6", "tháng 7", "tháng 8", "tháng 9", "tháng 10", "tháng 11", "tháng 12"],
+          "feedback": {
+            "correct": "Tuyệt! Đúng rồi, tháng {correct_answer}.",
+            "incorrect": "Tháng này là tháng {correct_answer} nhé {pronoun}."
+          }
+        },
+        
+        "ori_time_04": {
+          "question": "Còn năm nay là năm bao nhiêu {pronoun}?",
+          "points": 1,
+          "correct_answer": "dynamic_current_year",
+          "feedback": {
+            "correct": "Đúng rồi! Năm {correct_answer}.",
+            "incorrect": "Năm nay là năm {correct_answer} đó {pronoun}."
+          },
+          "note": "User in test session answered '2025' but system thinks it's 2024 - needs date configuration check"
+        },
+        
+        "ori_time_05": {
+          "question": "Bây giờ là buổi nào trong ngày nhỉ? Sáng, trưa, chiều hay tối?",
+          "points": 1,
+          "correct_answer": "dynamic_current_time_period",
+          "time_mapping": {
+            "sáng": "5:00-11:59",
+            "trưa": "12:00-13:59",
+            "chiều": "14:00-17:59",
+            "tối": "18:00-4:59"
+          },
+          "feedback": {
+            "correct": "Đúng rồi {pronoun}, đang là buổi {correct_answer}.",
+            "incorrect": "Bây giờ là buổi {correct_answer} nhé {pronoun}."
+          }
+        },
+        
+        "ori_place_01": {
+          "question": "Bây giờ chúng ta chuyển sang câu hỏi về địa điểm nhé.\n\n{Pronoun} đang ở quốc gia nào?",
+          "points": 1,
+          "correct_answer": "Việt Nam",
+          "acceptable_variations": ["việt nam", "viet nam", "vn", "nước việt nam"],
+          "feedback": {
+            "correct": "Đúng rồi! Chúng ta đang ở Việt Nam.",
+            "incorrect": "Chúng ta đang ở Việt Nam nhé {pronoun}."
+          }
+        },
+        
+        "ori_place_02": {
+          "question": "{Pronoun} đang ở tỉnh hay thành phố nào?",
+          "points": 1,
+          "correct_answer": "dynamic_from_user_city",
+          "feedback": {
+            "correct": "Đúng rồi! {Pronoun} đang ở {user_city}.",
+            "incorrect": "{Pronoun} đang ở {user_city} nhé."
+          }
+        },
+        
+        "ori_place_03": {
+          "question": "Vậy quận hay huyện nào nhỉ?",
+          "points": 1,
+          "correct_answer": "dynamic_from_user_district",
+          "acceptable_alternatives": ["quận", "huyện", "thị xã", "thành phố"],
+          "feedback": {
+            "correct": "Chính xác! Đây là {user_district}.",
+            "incorrect": "Khu vực này là {user_district} đó {pronoun}."
+          },
+          "cultural_note": "Rural areas use 'huyện', urban use 'quận' - accept both"
+        },
+        
+        "ori_place_04": {
+          "question": "{Pronoun} có biết đây là miền nào không? Miền Bắc, Trung hay Nam?",
+          "points": 1,
+          "correct_answer": "dynamic_from_user_city",
+          "region_mapping": {
+            "north": ["Hà Nội", "Hải Phòng", "Quảng Ninh", "Nam Định", "Thái Bình", "Hải Dương"],
+            "central": ["Đà Nẵng", "Huế", "Quảng Nam", "Quảng Ngãi", "Bình Định", "Phú Yên"],
+            "south": ["TP.HCM", "Hồ Chí Minh", "Cần Thơ", "Vũng Tàu", "Đồng Nai", "Bình Dương"]
+          },
+          "feedback": {
+            "correct": "Đúng rồi! Đây là Miền {correct_region}.",
+            "incorrect": "Đây là Miền {correct_region} nhé {pronoun}."
+          }
+        },
+        
+        "ori_place_05": {
+          "question": "Câu cuối cùng phần này: {Pronoun} đang ở chỗ nào? Ví dụ như ở nhà riêng, bệnh viện, hay đâu đó?",
+          "points": 1,
+          "acceptable_answers": ["nhà", "nhà riêng", "nhà mình", "bệnh viện", "phòng khám", "trung tâm y tế", "văn phòng"],
+          "feedback": {
+            "correct": "Vâng, {pronoun} đang ở {user_answer}.",
+            "incorrect": "Không sao {pronoun}. Chúng ta tiếp tục nhé."
+          }
+        }
+      }
+    },
+
+    "2_registration": {
+      "domain": "registration",
+      "total_points": 3,
+      "questions": {
+        "reg_01": {
+          "instruction_part1": "Bây giờ {pronoun} hãy chú ý lắng nghe nhé. Tôi sẽ đọc 3 từ, {pronoun} hãy nhớ kỹ.\n\nBa từ đó là: **Con mèo**, **Chiếc xe**, **Cây lúa**.",
+          "instruction_part2": "{Pronoun} hãy nhắc lại 3 từ vừa nghe được không?",
+          "words": ["Con mèo", "Chiếc xe", "Cây lúa"],
+          "points": 3,
+          "immediate_recall": true,
+          "scoring": {
+            "3_correct": 3,
+            "2_correct": 2,
+            "1_correct": 1,
+            "0_correct": 0
+          },
+          "repetition_allowed": "If 0/3, read ONCE more and ask again. Maximum 2 trials total.",
+          "instruction_after": "{Pronoun} hãy nhớ 3 từ này nhé, một lát nữa tôi sẽ hỏi lại.",
+          "feedback": {
+            "3_correct": "Tuyệt vời! {Pronoun} nhớ đủ cả 3 từ!",
+            "2_correct": "Tốt! {Pronoun} nhớ được 2 từ. Hãy cố nhớ cho đến khi tôi hỏi lại nhé.",
+            "1_correct": "Được rồi, {pronoun} nhớ được 1 từ. Hãy cố nhớ {number} từ đó nhé.",
+            "0_correct": "Không sao {pronoun}. Chúng ta tiếp tục, một lát tôi sẽ hỏi lại."
+          }
+        }
+      }
+    },
+
+    "3_attention_calculation": {
+      "domain": "attention_calculation",
+      "total_points": 5,
+      "change_note": "CHANGED: Serial 7s with education-adjusted scoring (NOT Months Backward)",
+      "rationale": "Serial 7s has better discriminative validity for MCI than Months Backward, despite education bias. Solution: Adjust cutoffs by education level.",
+      "citation": "Tombaugh & McIntyre (1992) - Serial 7s more sensitive to cognitive impairment than alternatives",
+      
+      "questions": {
+        "attn_serial_sub": {
+          "question": "Bây giờ chúng ta sẽ làm một bài tập tính toán đơn giản.\n\n{Pronoun} hãy tính 100 trừ 7 bằng bao nhiêu? Rồi lấy kết quả vừa tính được trừ tiếp cho 7. Cứ tiếp tục như vậy cho đến khi tôi nói dừng nhé.",
+          "expected_sequence": [93, 86, 79, 72, 65],
+          "points": 5,
+          "scoring_method": "Each objectively correct answer = 1 point (non-cumulative errors)",
+          "example": "If patient says 93 (correct), then 85 (wrong from their 93), then 78 (correct from 85): Score = 1 point only (93 correct, others objectively wrong)",
+          
+          "education_adjusted_cutoffs": {
+            "citation": "Based on Tombaugh & McIntyre (1992) + Vietnamese education adjustment principle",
+            "low_education_0_9_years": {
+              "normal": "≥3/5 correct",
+              "mci": "2/5 correct",
+              "dementia": "≤1/5 correct"
+            },
+            "medium_education_10_12_years": {
+              "normal": "≥4/5 correct",
+              "mci": "3/5 correct",
+              "dementia": "≤2/5 correct"
+            },
+            "high_education_13_plus_years": {
+              "normal": "5/5 correct",
+              "mci": "4/5 correct",
+              "dementia": "≤3/5 correct"
+            }
+          },
+          
+          "prompts": {
+            "if_silent": "Wait 10 seconds, then prompt: '{Pronoun} thử tiếp tục nhé, lấy kết quả vừa rồi trừ đi 7.'",
+            "if_refuses": "Accept refusal, mark 0/5, continue test."
+          },
+          
+          "feedback": {
+            "5_correct": "Xuất sắc! {Pronoun} tính đúng cả 5 số!",
+            "4_correct": "Rất tốt! {Pronoun} tính đúng 4/5 số.",
+            "3_correct": "Được rồi! {Pronoun} tính đúng 3 số.",
+            "2_correct": "Không sao {pronoun}, phép tính này hơi khó.",
+            "0_1_correct": "Không sao {pronoun}, chúng ta tiếp tục phần tiếp theo nhé."
+          }
+        }
+      },
+      
+      "removed_alternatives": {
+        "months_backward": {
+          "status": "REMOVED",
+          "reason": "Too easy, low discriminative validity. Does not replace Serial 7s.",
+          "citation": "Literature shows Months Backward has ceiling effect in normal elderly"
+        },
+        "backward_spelling": {
+          "status": "REMOVED",
+          "reason": "Not equivalent to Serial 7s. Too simple. Not in standard MMSE.",
+          "was": "Spell KHÔNG backward"
+        }
+      }
+    },
+
+    "4_executive_function": {
+      "domain": "executive_function",
+      "total_points": 3,
+      "rationale": "Executive dysfunction is early marker of MCI. MMSE lacks this, leading to poor sensitivity.",
+      "citation": "Nasreddine et al. (2005) - MoCA includes executive tests; Fraser et al. (2016) - Verbal fluency predicts MCI",
+      
+      "questions": {
+        "exec_verbal_fluency": {
+          "question": "Bây giờ {pronoun} hãy kể tên các con vật trong 60 giây.\n\nCàng nhiều càng tốt nhé! Bất kỳ con vật nào {pronoun} biết. Sẵn sàng chưa? Bắt đầu!",
+          "time_limit": 60,
+          "points": 2,
+          "scoring": {
+            "2_points": "≥15 animals (Normal)",
+            "1_point": "9-14 animals (Mild impairment / MCI range)",
+            "0_points": "<9 animals (Significant impairment)"
+          },
+          "vietnamese_norms": {
+            "citation": "Vietnamese normative data (JINS 2025)",
+            "mean_normal": "15-18 animals",
+            "cutoff_mci": "<12 animals"
+          },
+          "prompts": {
+            "if_silent_5_sec": "Còn con gì nữa không {pronoun}?",
+            "at_30_sec": "Rất tốt! Hãy tiếp tục nhé!",
+            "at_50_sec": "Còn 10 giây nữa {pronoun}!"
+          },
+          "counting_rules": {
+            "count": ["Unique animal names", "Includes birds, fish, insects", "Imaginary animals if named"],
+            "do_not_count": ["Duplicates", "Non-animals", "Generic 'con vật'"]
+          },
+          "feedback": {
+            "15_plus": "Xuất sắc! {Pronoun} kể được {count} con vật!",
+            "9_14": "Tốt! {Pronoun} kể được {count} con vật.",
+            "below_9": "Được rồi {pronoun}, chúng ta tiếp tục nhé."
+          }
+        },
+        
+        "exec_abstraction": {
+          "question": "Bây giờ tôi sẽ hỏi {pronoun} về sự giống nhau.\n\nCon mèo và con chó giống nhau ở điểm nào?",
+          "points": 1,
+          "correct_answers": {
+            "abstract": ["động vật", "thú", "con vật", "thú nuôi", "vật nuôi"],
+            "concrete_incorrect": ["có 4 chân", "có lông", "có đuôi", "cùng màu"]
+          },
+          "scoring": {
+            "1_point": "Abstract category-level answer (động vật, thú nuôi)",
+            "0_points": "Concrete physical features OR incorrect"
+          },
+          "feedback": {
+            "correct": "Đúng rồi! Chúng đều là {user_answer}.",
+            "incorrect": "Câu trả lời tốt là: Chúng đều là động vật hoặc thú nuôi nhé {pronoun}."
+          },
+          "citation": "From MoCA test - Nasreddine et al. (2005)"
+        }
+      }
+    },
+
+    "5_open_questions": {
+      "domain": "open_questions",
+      "total_points": 0,
+      "purpose": "Linguistic and acoustic feature extraction for multimodal MCI prediction",
+      "citation": "Fraser et al. (2016) - Spontaneous speech features predict MCI with 84% accuracy",
+      
+      "questions": {
+        "open_01_daily_routine": {
+          "question": "{Pronoun} kể cho tôi nghe về một ngày bình thường của {pronoun} nhé.\n\nTừ lúc thức dậy buổi sáng đến lúc đi ngủ tối, {pronoun} thường làm những gì?",
+          "min_duration": "30 seconds",
+          "prompt_if_short": "{Pronoun} có thể kể thêm chi tiết hơn được không? Buổi trưa thì sao? Buổi tối thì làm gì?",
+          "points": 0,
+          "scoring_note": "No points. This is for feature extraction only.",
+          "features_extracted": ["Speech rate", "Pause frequency", "TTR", "MLU", "Semantic coherence"],
+          "feedback": "Cảm ơn {pronoun}! Chúng ta tiếp tục câu hỏi tiếp theo nhé."
+        },
+        
+        "open_02_living_area": {
+          "question": "{Pronoun} có thể mô tả cho tôi biết khu vực {pronoun} đang sống không?\n\nXung quanh nhà có những gì?",
+          "min_duration": "20 seconds",
+          "prompt_if_short": "Có chợ không {pronoun}? Có công viên không? Gần trường học hay bệnh viện không?",
+          "points": 0,
+          "feedback": "Tôi hiểu rồi! Nghe có vẻ là một khu vực tốt đấy {pronoun}."
+        },
+        
+        "open_03_hobbies": {
+          "question": "{Pronoun} thích làm gì trong lúc rảnh rỗi?\n\nHãy kể cho tôi nghe về sở thích của {pronoun} đi.",
+          "min_duration": "20 seconds",
+          "prompt_if_short": "{Pronoun} có xem ti vi không? Có đọc sách không? Có gặp bạn bè không?",
+          "points": 0,
+          "feedback": "Thú vị quá! Cảm ơn {pronoun} đã chia sẻ nhé."
+        },
+        
+        "open_04_family": {
+          "question": "{Pronoun} có thể kể cho tôi nghe về gia đình của {pronoun} không?\n\nCó bao nhiêu người? Họ làm nghề gì?",
+          "min_duration": "20 seconds",
+          "prompt_if_short": "Con cái ở đâu {pronoun}? Có cháu chắt chưa? Họ làm gì?",
+          "points": 0,
+          "cultural_note": "Family is central in Vietnamese culture. This question emotionally engages patient.",
+          "feedback": "Gia đình hạnh phúc quá {pronoun}! Cảm ơn {pronoun} đã kể cho tôi nghe."
+        }
+      }
+    },
+
+    "6_recall": {
+      "domain": "recall",
+      "total_points": 3,
+      "delay_requirement": {
+        "minimum_seconds": 360,
+        "optimal_seconds": 420,
+        "maximum_seconds": 480,
+        "note": "6-8 minutes from END of registration to START of recall"
+      },
+      "citation": "Folstein et al. (1975) - Minimum 5 minutes with intervening tasks",
+      
+      "questions": {
+        "recall_01": {
+          "check_delay": "System must verify at least 360 seconds elapsed since registration",
+          "question": "Bây giờ {pronoun} hãy nhớ lại 3 từ mà tôi đã đọc lúc nãy.\n\n{Pronoun} còn nhớ không?",
+          "words_to_recall": ["Con mèo", "Chiếc xe", "Cây lúa"],
+          "points": 3,
+          "scoring": {
+            "3_correct": 3,
+            "2_correct": 2,
+            "1_correct": 1,
+            "0_correct": 0
+          },
+          "prompts": {
+            "if_silent": "Prompt: '{Pronoun} cố nhớ xem, có từ nào không?'",
+            "no_cueing": "Do NOT give semantic or phonemic cues",
+            "accept_0": "Even 0/3 is valid data. Continue test."
+          },
+          "feedback": {
+            "3_correct": "Tuyệt vời! {Pronoun} nhớ đủ cả 3 từ!",
+            "2_correct": "Tốt! {Pronoun} nhớ được 2 từ: {words_recalled}.",
+            "1_correct": "{Pronoun} nhớ được 1 từ: {word_recalled}.",
+            "0_correct": "Không sao {pronoun}. Ba từ đó là: Con mèo, Chiếc xe, Cây lúa."
+          },
+          "clinical_note": "Recall 0-1/3 is highly sensitive for MCI (75-80% sensitivity)"
+        }
+      }
+    },
+
+    "7_language": {
+      "domain": "language",
+      "total_points": 8,
+      
+      "questions": {
+        "lang_naming_01": {
+          "question": "Bây giờ chúng ta sẽ kiểm tra về ngôn ngữ.\n\nTôi sẽ mô tả một đồ vật, {pronoun} cho biết đó là gì nhé.\n\nĐồ vật này: Hình tròn, đeo ở tay, dùng để xem giờ.\n\n{Pronoun} biết đó là gì không?",
+          "correct_answer": "đồng hồ",
+          "acceptable_variations": ["đồng hồ", "đồng hồ đeo tay", "cái đồng hồ"],
+          "points": 1,
+          "feedback": {
+            "correct": "Đúng rồi! Đó là đồng hồ.",
+            "incorrect": "Đó là đồng hồ nhé {pronoun}."
+          }
+        },
+        
+        "lang_naming_02": {
+          "question": "Tiếp theo nhé.\n\nĐồ vật này: Dùng để viết, có mực bên trong, cầm trên tay.\n\n{Pronoun} biết đó là gì không?",
+          "correct_answer": "bút",
+          "acceptable_variations": ["bút", "cây bút", "cây viết", "bút bi"],
+          "points": 1,
+          "feedback": {
+            "correct": "Chính xác! Đó là bút.",
+            "incorrect": "Đó là bút (hoặc cây viết) nhé {pronoun}."
+          }
+        },
+        
+        "lang_repetition": {
+          "question": "Bây giờ {pronoun} hãy nhắc lại câu tôi đọc. Chỉ được nghe MỘT LẦN thôi nhé.\n\nCâu này là: **Không có nếu, và, hoặc nhưng gì cả.**\n\n{Pronoun} nhắc lại nhé!",
+          "correct_answer": "Không có nếu, và, hoặc nhưng gì cả",
+          "points": 1,
+          "scoring": {
+            "strict": "Must be EXACTLY correct. Any word omission, substitution, or addition = 0 points"
+          },
+          "common_errors": ["Omitting 'gì cả'", "Substituting conjunctions", "Adding extra words"],
+          "feedback": {
+            "correct": "Hoàn hảo! {Pronoun} nhắc lại chính xác!",
+            "incorrect": "Không sao {pronoun}. Câu đúng là: 'Không có nếu, và, hoặc nhưng gì cả.'"
+          },
+          "citation": "Folstein et al. (1975) - Tests working memory and phonological loop"
+        },
+        
+        "lang_comprehension_3step": {
+          "question": "Bây giờ tôi sẽ yêu cầu {pronoun} làm 3 việc bằng cách NÓI.\n\n**Thứ nhất:** Nói 'Tôi hiểu rồi'\n**Thứ hai:** Đếm từ 1 đến 3\n**Thứ ba:** Nói 'Xong rồi'\n\n{Pronoun} hãy làm theo thứ tự nhé. Bắt đầu!",
+          "points": 3,
+          "note": "TEMPORARY verbal commands. Standard MMSE uses MOTOR commands (take paper, fold, return)",
+          "motor_version_preferred": {
+            "instruction": "Tôi sẽ đưa {pronoun} một tờ giấy và yêu cầu {pronoun} làm 3 việc. {Pronoun} hãy lắng nghe và làm theo nhé.",
+            "step_1": "Cầm tờ giấy bằng tay phải (or tay trái if left-handed)",
+            "step_2": "Gấp tờ giấy lại làm đôi",
+            "step_3": "Đưa tờ giấy lại cho tôi",
+            "materials_needed": "1 blank paper",
+            "why_preferred": "Motor commands test executive function + comprehension. Verbal too easy."
+          },
+          "scoring_current_verbal": {
+            "3_points": "All 3 steps correct in order",
+            "2_points": "2 steps correct",
+            "1_point": "1 step correct",
+            "0_points": "0 steps correct"
+          },
+          "feedback": {
+            "3_correct": "Xuất sắc! {Pronoun} làm đúng cả 3 bước!",
+            "2_correct": "Tốt! {Pronoun} làm đúng 2 bước.",
+            "1_correct": "Được rồi, {pronoun} làm đúng 1 bước.",
+            "0_correct": "Không sao {pronoun}. Ba bước đó là: Nói 'Tôi hiểu rồi' → Đếm 1-2-3 → Nói 'Xong rồi'."
+          }
+        },
+        
+        "lang_comprehension_listening": {
+          "question": "Tôi sẽ đọc một câu, {pronoun} lắng nghe rồi trả lời câu hỏi nhé.\n\nCâu này là: **Con ong chăm chỉ bay qua vườn hoa.**\n\n{Pronoun} cho biết con ong đang làm gì?",
+          "correct_answer": "bay qua vườn hoa",
+          "acceptable_variations": ["bay qua vườn hoa", "đang bay qua vườn hoa", "bay qua vườn", "bay"],
+          "points": 1,
+          "scoring": {
+            "1_point": "Captures main action (bay) with or without object",
+            "0_points": "Irrelevant answer or 'không biết'"
+          },
+          "feedback": {
+            "correct": "Đúng rồi! Con ong đang bay qua vườn hoa.",
+            "incorrect": "Con ong trong câu đang bay qua vườn hoa nhé {pronoun}."
+          }
+        },
+        
+        "lang_sentence_production": {
+          "question": "Bây giờ {pronoun} hãy nói một câu hoàn chỉnh về thời tiết hôm nay.\n\nCâu của {pronoun} cần có chủ ngữ và vị ngữ, phải có nghĩa nhé.",
+          "points": 1,
+          "requirements": {
+            "subject": "Required (e.g., trời, thời tiết, hôm nay)",
+            "predicate": "Required (e.g., nóng, mát, đẹp, mưa)",
+            "meaningful": "Must be semantically coherent",
+            "on_topic": "Must relate to weather"
+          },
+          "examples_acceptable": [
+            "Hôm nay trời nóng",
+            "Trời đang mưa",
+            "Thời tiết hôm nay đẹp",
+            "Trời hôm nay mát mẻ"
+          ],
+          "examples_not_acceptable": [
+            "Nóng (no subject)",
+            "Trời trời (nonsensical)",
+            "Có (incomplete)"
+          ],
+          "scoring": {
+            "1_point": "Complete sentence with subject + predicate, meaningful, on topic",
+            "0_points": "Incomplete, nonsensical, or not related to weather"
+          },
+          "feedback": {
+            "correct": "Tốt! Câu hoàn chỉnh và có nghĩa.",
+            "incorrect": "Câu cần có chủ ngữ và vị ngữ nhé {pronoun}. Ví dụ: 'Hôm nay trời nóng'."
+          },
+          "note": "Adapted from MMSE writing task for remote/verbal testing"
+        }
+      }
+    },
+
+    "8_visuospatial": {
+      "domain": "visuospatial",
+      "total_points": 3,
+      "change_note": "Clock Drawing Test (CDT) replaces pentagon copying. More sensitive to MCI + tests executive function.",
+      "citation": "Shulman et al. (1993) - CDT validation. Sensitivity 85-93% for dementia.",
+      
+      "questions": {
+        "visual_clock_drawing": {
+          "question": "Cuối cùng, {pronoun} hãy tưởng tượng hoặc vẽ một mặt đồng hồ.\n\nNếu {pronoun} có giấy bút, hãy vẽ hình tròn, viết đầy đủ các số từ 1 đến 12, rồi vẽ kim đồng hồ chỉ **11 giờ 10 phút**.",
+          "points": 3,
+          "scoring_system": "Modified Shulman 6-point scale → Converted to 0-3 points for MMSE",
+          "citation": "Shulman et al. (1993, 2000) - Clock Drawing Test scoring",
+          
+          "shulman_to_mmse_conversion": {
+            "shulman_6_or_5": {
+              "description": "Perfect or near-perfect clock",
+              "mmse_points": 3,
+              "criteria": ["Closed circle", "All 12 numbers in correct positions", "Hour and minute hands accurate (11:10)", "Hour hand shorter than minute hand"]
+            },
+            "shulman_4_or_3": {
+              "description": "Minor errors in number placement or hands",
+              "mmse_points": 2,
+              "criteria": ["All 12 numbers but positions slightly off", "Hands correct time but not clearly differentiated", "Hands slightly wrong position but close"]
+            },
+            "shulman_2": {
+              "description": "Moderate errors",
+              "mmse_points": 1,
+              "criteria": ["Missing numbers or repeated numbers", "Hands wrong time", "Disorganized layout"]
+            },
+            "shulman_1_or_0": {
+              "description": "Severe errors or unable to complete",
+              "mmse_points": 0,
+              "criteria": ["No recognizable circle or clock shape", "Numbers completely disorganized", "No hands or irrelevant hands", "Refusal"]
+            }
+          },
+          
+          "verbal_alternative_for_remote": {
+            "note": "If remote/telephone testing and patient cannot draw",
+            "question": "{Pronoun} hãy tưởng tượng một mặt đồng hồ.\n\nNếu kim chỉ 11 giờ 10 phút, kim giờ chỉ vào số mấy? Kim phút chỉ vào số mấy?",
+            "correct_answer": {
+              "hour_hand": "Giữa số 11 và 12 (gần 11)",
+              "minute_hand": "Số 2"
+            },
+            "scoring_verbal": {
+              "3_points": "Both hands correct with proportional reasoning",
+              "2_points": "Both correct OR one correct with explanation",
+              "1_point": "One correct, one wrong",
+              "0_points": "Both wrong or cannot answer"
+            },
+            "note_limitation": "Verbal CDT is less sensitive than drawn CDT. Prefer drawing when possible."
+          },
+          
+          "feedback": {
+            "3_points": "Hoàn hảo! Đồng hồ của {pronoun} rất chính xác!",
+            "2_points": "Tốt! Đồng hồ của {pronoun} có một số chi tiết nhỏ chưa chính xác nhưng nhìn chung tốt.",
+            "1_point": "Được rồi {pronoun}. Đồng hồ còn một số chi tiết cần chỉnh sửa.",
+            "0_points": "Không sao {pronoun}. Chúng ta đã hoàn thành bài kiểm tra rồi!"
+          },
+          
+          "clinical_significance": "CDT tests: visuospatial skills, executive planning, semantic knowledge. Highly sensitive to MCI and dementia."
+        }
+      },
+      
+      "removed_question": {
+        "visual_spatial_01_OLD": {
+          "status": "REMOVED from v2.0",
+          "was": "Imagination task: 'Tưởng tượng 2 hình vuông chồng lên nhau'",
+          "reason": "Not scorable, not standard MMSE, not sensitive to MCI. Replaced with Clock Drawing Test."
+        }
+      }
+    }
+  },
+
+  "completion_message": {
+    "greeting": "🎉 Chúc mừng {pronoun}! Chúng ta đã hoàn thành bài kiểm tra rồi!",
+    "summary_intro": "Đây là kết quả của {pronoun} nhé:",
+    "score_format": {
+      "total": "**Tổng điểm MMSE:** {total_score}/35 điểm",
+      "adjusted": "**Điểm sau điều chỉnh:** {adjusted_score} điểm (điều chỉnh theo tuổi và học vấn)",
+      "classification": "**Phân loại:** {risk_level}",
+      "confidence": "**Độ tin cậy:** {confidence_level}"
+    },
+    "domain_breakdown": {
+      "title": "**Chi tiết từng phần:**",
+      "format": "• {domain_name}: {score}/{max_points} điểm"
+    },
+    "multimodal_analysis": {
+      "title": "**🧬 Phân tích đa phương thức (Multimodal Analysis):**",
+      "acoustic": "• Đặc trưng âm thanh: {acoustic_feature_count} features",
+      "linguistic": "• Đặc trưng ngôn ngữ: {linguistic_feature_count} features",
+      "mci_risk": "• Ước tính nguy cơ MCI: **{mci_probability}%**",
+      "interpretation": "• Diễn giải: {risk_interpretation}"
+    },
+    "recommendations": {
+      "on": {
+        "title": "✅ **Ổn (Normal/Healthy Aging)**",
+        "message": "Chức năng nhận thức của {pronoun} bình thường cho độ tuổi và trình độ học vấn.\n\n**Khuyến nghị:**\n• Duy trì lối sống lành mạnh\n• Tập thể dục thường xuyên\n• Giữ hoạt động tinh thần (đọc sách, giao lưu)\n• Tái khám định kỳ hàng năm"
+      },
+      "nguy_co_nhe": {
+        "title": "⚠️ **Nguy cơ nhẹ (Mild Risk/Possible MCI)**",
+        "message": "Kết quả cho thấy một số biểu hiện cần theo dõi.\n\n**Khuyến nghị:**\n• Tái khám sau 6-12 tháng\n• Tăng cường hoạt động trí óc\n• Kiểm soát các yếu tố nguy cơ (huyết áp, đường huyết, cholesterol)\n• Tham khảo ý kiến bác sĩ thần kinh nếu có triệu chứng tăng"
+      },
+      "nguy_co_cao": {
+        "title": "🚨 **Nguy cơ cao (High Risk/Probable MCI or Dementia)**",
+        "message": "Kết quả cho thấy suy giảm nhận thức đáng kể.\n\n**Khuyến nghị:**\n• **Khám bác sĩ chuyên khoa thần kinh NGAY**\n• Có thể cần thêm xét nghiệm (chụp não, xét nghiệm máu)\n• Đánh giá toàn diện chức năng sinh hoạt hàng ngày\n• Gia đình nên hỗ trợ và theo dõi sát sao"
+      }
+    },
+    "closing": "💝 Cảm ơn {pronoun} đã tham gia bài kiểm tra!\nKết quả này sẽ giúp bác sĩ đánh giá tình trạng sức khỏe của {pronoun} tốt hơn."
+  },
+
+  "implementation_notes": {
+    "pronoun_system": {
+      "male": "Ông",
+      "female": "Bà", 
+      "default": "Bạn",
+      "usage": "Replace {pronoun} with appropriate pronoun throughout. {Pronoun} for sentence-initial (capitalized)."
+    },
+    
+    "timing_requirements": {
+      "animal_fluency": "MUST use timer - exactly 60 seconds",
+      "recall_delay": "MUST track time from registration end to recall start - minimum 360 seconds",
+      "open_questions": "Allow natural speech - do not rush patient"
+    },
+    
+    "audio_recording": {
+      "required_for": ["open_01", "open_02", "open_03", "open_04", "exec_verbal_fluency"],
+      "quality": "Clear speech, minimal background noise",
+      "duration": "Approximately 5-8 minutes total speech for analysis"
+    },
+    
+    "scoring_algorithm": {
+      "step_1": "Calculate raw score from all domains (0-35 points)",
+      "step_2": "Get user age and education_years from user_info",
+      "step_3": "Calculate Age_Penalty = 0.2 × max(0, age - 60)",
+      "step_4": "Determine Education_Bonus: 0 (≤9yr), 1 (10-12yr), 2 (>12yr)",
+      "step_5": "Adjusted_Score = Raw_Score - Age_Penalty + Education_Bonus",
+      "step_6": "Compare to education-specific cutoffs",
+      "step_7": "Classify: Ổn / Nguy cơ nhẹ / Nguy cơ cao",
+      "step_8": "Extract acoustic + linguistic features from recordings",
+      "step_9": "Calculate multimodal MCI risk probability",
+      "step_10": "Generate final report with recommendations"
+    },
+    
+    "validation_checks": {
+      "check_1": "All 21 main questions attempted (not including open questions)",
+      "check_2": "Recall delay ≥360 seconds",
+      "check_3": "Total score = sum of domain scores",
+      "check_4": "Audio recordings exist for required questions",
+      "check_5": "User_info complete (age, education_years, gender, city, district)"
+    }
+  },
+
+  "scientific_citations": {
+    "scoring_adjustments": [
+      {
+        "citation": "Murden, R. A., McRae, T. D., Kaner, S., & Bucknam, M. E. (1991). Mini-Mental State exam scores vary with education in blacks and whites. Journal of the American Geriatrics Society, 39(2), 149-155.",
+        "finding": "Education significantly affects MMSE scores. Cutoff 17 for grade school, 23 for high school, 24+ for college.",
+        "application": "Used as basis for education-adjusted cutoffs in Vietnamese population"
+      },
+      {
+        "citation": "Vietnamese normative data. Journal of International Neuropsychological Society, 2025. Sample n=385, age 40-89.",
+        "finding": "MMSE mean 27.8±1.0 for cognitively normal Vietnamese. Age and education significantly affect all tests.",
+        "application": "Confirmed need for age/education adjustment. Used for Vietnamese-specific norms."
+      },
+      {
+        "citation": "Correlates of Cognitive Impairment in Older Vietnamese in Thailand. Journal of Cross-Cultural Gerontology, 2013.",
+        "finding": "33% scored <23 using standard cutoff, but only 12.9% using education-adjusted cutoff (17 for ≤grade school).",
+        "application": "Demonstrated critical importance of education adjustment for Vietnamese population"
+      },
+      {
+        "citation": "Tombaugh, T. N., & McIntyre, N. J. (1992). The mini-mental state examination: A comprehensive review. Journal of the American Geriatrics Society, 40(9), 922-935.",
+        "finding": "Serial 7s more sensitive to cognitive impairment than alternatives. Education affects performance.",
+        "application": "Retained Serial 7s with education-adjusted scoring instead of easier alternatives"
+      },
+      {
+        "citation": "Shulman, K. I., Shedletsky, R., & Silver, I. L. (1986). The challenge of time: Clock-drawing and cognitive function in the elderly. International Journal of Geriatric Psychiatry, 1(2), 135-140.",
+        "finding": "Clock Drawing Test has 85-93% sensitivity for dementia. Tests visuospatial + executive function.",
+        "application": "Replaced imagination task with Clock Drawing Test for better MCI detection"
+      },
+      {
+        "citation": "Nasreddine, Z. S., Phillips, N. A., Bédirian, V., et al. (2005). The Montreal Cognitive Assessment, MoCA: A brief screening tool for mild cognitive impairment. Journal of the American Geriatrics Society, 53(4), 695-699.",
+        "finding": "MoCA detects MCI better than MMSE (90% vs 18% sensitivity) due to executive function tests.",
+        "application": "Added executive function domain (verbal fluency + abstraction) to increase MCI sensitivity"
+      },
+      {
+        "citation": "Fraser, K. C., Meltzer, J. A., & Rudzicz, F. (2016). Linguistic features identify Alzheimer's disease in narrative speech. Journal of Alzheimer's Disease, 49(2), 407-422.",
+        "finding": "Acoustic and linguistic features from spontaneous speech predict MCI with 79-84% accuracy.",
+        "application": "Added 4 open-ended questions for multimodal feature extraction"
+      }
+    ],
+    
+    "formula_justification": {
+      "age_penalty": {
+        "formula": "0.2 points per year after 60",
+        "source": "Vietnamese JINS 2025 study + Tombaugh & McIntyre (1992) meta-analysis",
+        "rationale": "Reflects normal cognitive aging. Prevents misclassification of healthy elderly as impaired."
+      },
+      "education_bonus": {
+        "formula": "+0 (≤9yr), +1 (10-12yr), +2 (>12yr)",
+        "source": "Murden et al. (1991) + Vietnamese study (2013)",
+        "rationale": "Compensates for lower baseline due to limited education, not a true 'boost'. Essential for fair assessment."
+      },
+      "35_point_scale": {
+        "calculation": "Original 30-point × 1.167 (35/30 ratio)",
+        "added_points": "5 points from Executive Function domain (2 for verbal fluency + 1 for abstraction + 2 redistributed to visuospatial)",
+        "rationale": "Maintains compatibility with MMSE while adding critical MCI-sensitive tests"
+      }
+    }
+  }
+}
