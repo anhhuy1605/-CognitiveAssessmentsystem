@@ -83,6 +83,18 @@ interface MMSEDomain {
   questions: MMSEQuestion[];
 }
 
+interface MMSEData {
+  domains: MMSEDomain[];
+  metadata?: {
+    test_name?: string;
+    total_points?: number;
+    clinical_cutoff?: number;
+    estimated_duration?: string;
+    validation_source?: string;
+  };
+  greeting_variable?: string;
+}
+
 interface SessionState {
   sessionId: string;
   userInfo: UserInfo;
@@ -159,7 +171,7 @@ export default function MMSEChatbotPage() {
   
   // Session state
   const [session, setSession] = useState<SessionState | null>(null);
-  const [mmseData, setMmseData] = useState<{ domains: MMSEDomain[] } | null>(null);
+  const [mmseData, setMmseData] = useState<MMSEData | null>(null);
   const [isLoadingQuestions, setIsLoadingQuestions] = useState(true);
   
   // Chat state
