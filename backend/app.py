@@ -530,14 +530,52 @@ else:
     logger.info("✅ SECRET_KEY loaded from environment")
 app.config['SECRET_KEY'] = SECRET_KEY
 
-# Configure CORS to allow all origins (for development)
-CORS(app, resources={
-    r"/*": {
-        "origins": ["http://localhost:3000", "http://127.0.0.1:3000", "*"],
-        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        "allow_headers": ["Content-Type", "Authorization"]
-    }
-})
+# Configure CORS - allow Vercel frontend and localhost
+cors_origins = os.environ.get('CORS_ORIGINS', '')
+if cors_origins:
+    # Parse comma-separated origins from environment variable
+    allowed_origins = [origin.strip() for origin in cors_origins.split(',')]
+else:
+    # Default origins if not set
+    allowed_origins = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "https://cognitiveassessmentsystem-frontend.vercel.app",
+    ]
+
+# Configure CORS with explicit origins
+# Note: We'll handle Vercel preview deployments in after_request hook
+CORS(app, 
+     resources={r"/*": {
+         "origins": allowed_origins,
+         "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+         "allow_headers": ["Content-Type", "Authorization", "X-Requested-With"],
+         "supports_credentials": True
+     }}
+)
+
+# Handle Vercel preview deployments (any *.vercel.app domain)
+@app.after_request
+def after_request(response):
+    origin = request.headers.get('Origin')
+    if origin:
+        # Check if origin is already handled by CORS
+        if 'Access-Control-Allow-Origin' in response.headers:
+            # CORS already handled this origin, but check if it's a Vercel domain we want to allow
+            if origin.endswith('.vercel.app') and origin not in allowed_origins:
+                # Override CORS header to allow this Vercel preview deployment
+                response.headers['Access-Control-Allow-Origin'] = origin
+        else:
+            # CORS didn't handle it, check if it's a Vercel domain
+            if origin.endswith('.vercel.app'):
+                response.headers['Access-Control-Allow-Origin'] = origin
+                response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization,X-Requested-With'
+                response.headers['Access-Control-Allow-Methods'] = 'GET,POST,PUT,DELETE,OPTIONS'
+                response.headers['Access-Control-Allow-Credentials'] = 'true'
+    return response
+
+logger.info(f"✅ CORS configured. Allowed origins: {allowed_origins}")
+logger.info("✅ CORS also allows all *.vercel.app domains for preview deployments")
 
 # Register blueprints (optional if modules missing)
 try:

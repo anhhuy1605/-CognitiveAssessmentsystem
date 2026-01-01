@@ -37,19 +37,25 @@ def init_services():
     """Initialize services lazily"""
     global chatbot_service, transcriber
     
-    if chatbot_service is None and MMSEChatbotService:
-        try:
-            chatbot_service = MMSEChatbotService()
-            logger.info("✅ MMSEChatbotService initialized")
-        except Exception as e:
-            logger.error(f"❌ Failed to initialize MMSEChatbotService: {e}")
-    
-    if transcriber is None and VietnameseTranscriber:
-        try:
-            transcriber = VietnameseTranscriber()
-            logger.info("✅ VietnameseTranscriber initialized")
-        except Exception as e:
-            logger.error(f"❌ Failed to initialize VietnameseTranscriber: {e}")
+    try:
+        if chatbot_service is None and MMSEChatbotService:
+            try:
+                chatbot_service = MMSEChatbotService()
+                logger.info("✅ MMSEChatbotService initialized")
+            except Exception as e:
+                logger.error(f"❌ Failed to initialize MMSEChatbotService: {e}", exc_info=True)
+                chatbot_service = None
+        
+        if transcriber is None and VietnameseTranscriber:
+            try:
+                transcriber = VietnameseTranscriber()
+                logger.info("✅ VietnameseTranscriber initialized")
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to initialize VietnameseTranscriber: {e}")
+                # Transcriber is optional for chatbot, so just log warning
+                transcriber = None
+    except Exception as e:
+        logger.error(f"❌ Error in init_services: {e}", exc_info=True)
 
 
 # ============================================
@@ -99,9 +105,24 @@ def get_questions():
 def create_session():
     """Create a new MMSE chatbot session"""
     try:
-        init_services()
+        logger.info(f"📨 Received session creation request from {request.remote_addr}")
+        logger.info(f"📨 Request headers: {dict(request.headers)}")
+        
+        # Initialize services (non-blocking, has fallback)
+        try:
+            init_services()
+        except Exception as init_error:
+            logger.warning(f"⚠️ Service initialization had issues (continuing anyway): {init_error}")
         
         data = request.get_json()
+        if not data:
+            logger.error("❌ No JSON data in request")
+            return jsonify({
+                'success': False,
+                'error': 'No JSON data provided'
+            }), 400
+        
+        logger.info(f"📋 Received data: {list(data.keys())}")
         
         user_info = data.get('user_info', {})
         session_id = data.get('session_id')
@@ -109,35 +130,49 @@ def create_session():
         if not session_id:
             session_id = f"mmse_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{os.urandom(4).hex()}"
         
+        logger.info(f"🆔 Creating session: {session_id}")
+        
         if chatbot_service:
-            # Create session using the service
-            state = chatbot_service.create_session(session_id, user_info)
-            
-            # Generate greeting
-            greeting = _generate_greeting(user_info)
-            chatbot_service.set_greeting(session_id, greeting)
-            
-            return jsonify({
-                'success': True,
-                'session_id': session_id,
-                'greeting': greeting,
-                'message': f"Xin chào {greeting}! Tôi là trợ lý đánh giá sức khỏe nhận thức."
-            })
+            try:
+                # Create session using the service
+                state = chatbot_service.create_session(session_id, user_info)
+                
+                # Generate greeting
+                greeting = _generate_greeting(user_info)
+                chatbot_service.set_greeting(session_id, greeting)
+                
+                logger.info(f"✅ Session created successfully: {session_id}")
+                
+                return jsonify({
+                    'success': True,
+                    'session_id': session_id,
+                    'greeting': greeting,
+                    'message': f"Xin chào {greeting}! Tôi là trợ lý đánh giá sức khỏe nhận thức."
+                }), 200
+            except Exception as service_error:
+                logger.error(f"❌ Error in chatbot_service.create_session: {service_error}", exc_info=True)
+                # Fall through to fallback
         else:
-            # Fallback without service
-            greeting = _generate_greeting(user_info)
-            return jsonify({
-                'success': True,
-                'session_id': session_id,
-                'greeting': greeting,
-                'message': f"Xin chào {greeting}! Tôi là trợ lý đánh giá sức khỏe nhận thức."
-            })
+            logger.warning("⚠️ chatbot_service not available, using fallback")
+        
+        # Fallback without service (still works)
+        greeting = _generate_greeting(user_info)
+        logger.info(f"✅ Session created (fallback mode): {session_id}")
+        
+        return jsonify({
+            'success': True,
+            'session_id': session_id,
+            'greeting': greeting,
+            'message': f"Xin chào {greeting}! Tôi là trợ lý đánh giá sức khỏe nhận thức.",
+            'warning': 'Running in fallback mode - some features may be limited'
+        }), 200
             
     except Exception as e:
-        logger.error(f"Error creating session: {e}")
+        logger.error(f"❌ Error creating session: {e}", exc_info=True)
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': str(e),
+            'message': 'Failed to create session'
         }), 500
 
 
