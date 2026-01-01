@@ -25,8 +25,17 @@ import soundfile as sf
 import numpy as np
 from pydub import AudioSegment
 
-# Gemini API
-import google.generativeai as genai
+# Gemini API - try new package first, fallback to deprecated one
+try:
+    from google import genai
+    print("✅ Using new google.genai package")
+except ImportError:
+    try:
+        import google.generativeai as genai
+        print("⚠️ Using deprecated google.generativeai - please update to google.genai")
+    except ImportError:
+        print("❌ No Gemini package available")
+        genai = None
 
 logger = logging.getLogger(__name__)
 

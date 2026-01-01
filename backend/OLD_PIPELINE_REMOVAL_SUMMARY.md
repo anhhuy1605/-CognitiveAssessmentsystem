@@ -89,3 +89,5 @@ GPT (OpenAI) → MMSE Scoring & Evaluation
 - Server sẽ raise error nếu MCI modules không available (không có fallback)
 - Tất cả prediction phải đi qua new pipeline (Modules)
 
+
+

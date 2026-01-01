@@ -518,14 +518,64 @@ logger.info(f"🎤 Vietnamese ASR Model: {vi_asr_model}")
 
 # Initialize Flask app
 app = Flask(__name__)
-# Configure CORS to allow all origins (for development)
-CORS(app, resources={
-    r"/*": {
-        "origins": ["http://localhost:3000", "http://127.0.0.1:3000", "*"],
-        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        "allow_headers": ["Content-Type", "Authorization"]
-    }
-})
+
+# Configure SECRET_KEY with fallback
+import secrets
+SECRET_KEY = os.environ.get('SECRET_KEY')
+if not SECRET_KEY:
+    SECRET_KEY = secrets.token_hex(32)
+    logger.warning("⚠️ WARNING: No SECRET_KEY environment variable set. Using auto-generated key.")
+    logger.warning("⚠️ For production, set SECRET_KEY in Railway environment variables!")
+else:
+    logger.info("✅ SECRET_KEY loaded from environment")
+app.config['SECRET_KEY'] = SECRET_KEY
+
+# Configure CORS - allow Vercel frontend and localhost
+cors_origins = os.environ.get('CORS_ORIGINS', '')
+if cors_origins:
+    # Parse comma-separated origins from environment variable
+    allowed_origins = [origin.strip() for origin in cors_origins.split(',')]
+else:
+    # Default origins if not set
+    allowed_origins = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "https://cognitiveassessmentsystem-frontend.vercel.app",
+    ]
+
+# Configure CORS with explicit origins
+# Note: We'll handle Vercel preview deployments in after_request hook
+CORS(app, 
+     resources={r"/*": {
+         "origins": allowed_origins,
+         "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+         "allow_headers": ["Content-Type", "Authorization", "X-Requested-With"],
+         "supports_credentials": True
+     }}
+)
+
+# Handle Vercel preview deployments (any *.vercel.app domain)
+@app.after_request
+def after_request(response):
+    origin = request.headers.get('Origin')
+    if origin:
+        # Check if origin is already handled by CORS
+        if 'Access-Control-Allow-Origin' in response.headers:
+            # CORS already handled this origin, but check if it's a Vercel domain we want to allow
+            if origin.endswith('.vercel.app') and origin not in allowed_origins:
+                # Override CORS header to allow this Vercel preview deployment
+                response.headers['Access-Control-Allow-Origin'] = origin
+        else:
+            # CORS didn't handle it, check if it's a Vercel domain
+            if origin.endswith('.vercel.app'):
+                response.headers['Access-Control-Allow-Origin'] = origin
+                response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization,X-Requested-With'
+                response.headers['Access-Control-Allow-Methods'] = 'GET,POST,PUT,DELETE,OPTIONS'
+                response.headers['Access-Control-Allow-Credentials'] = 'true'
+    return response
+
+logger.info(f"✅ CORS configured. Allowed origins: {allowed_origins}")
+logger.info("✅ CORS also allows all *.vercel.app domains for preview deployments")
 
 # Register blueprints (optional if modules missing)
 try:
@@ -547,6 +597,28 @@ try:
     logger.info("✅ MMSE Chatbot API registered")
 except ImportError as e:
     logger.warning(f"⚠️ MMSE Chatbot API not available: {e}")
+
+# Error handlers
+@app.errorhandler(404)
+def not_found_error(error):
+    """Handle 404 errors with JSON response"""
+    return jsonify({
+        'success': False,
+        'error': 'Not Found',
+        'message': 'The requested endpoint does not exist',
+        'status_code': 404
+    }), 404
+
+@app.errorhandler(500)
+def internal_error(error):
+    """Handle 500 errors with JSON response"""
+    logger.error(f"❌ Internal server error: {error}", exc_info=True)
+    return jsonify({
+        'success': False,
+        'error': 'Internal Server Error',
+        'message': str(error) if app.debug else 'An internal error occurred',
+        'status_code': 500
+    }), 500
 
 # Global variables
 vietnamese_transcriber = None
@@ -2330,6 +2402,7 @@ def health_check():
     
     return jsonify({
         'status': 'healthy',
+        'service': 'cognitive-assessment-backend',
         'timestamp': datetime.now().isoformat(),
         'mci_service': mci_status,
         'gemini_available': bool(gemini_api_key),
@@ -2346,7 +2419,62 @@ def health_check():
             'debug': os.getenv('DEBUG', 'True'),
             'node_env': os.getenv('NODE_ENV', 'development')
         }
-    })
+    }), 200
+
+@app.route('/api/status', methods=['GET'])
+def status_check():
+    """Detailed status check endpoint"""
+    # Check optional package availability
+    try:
+        import webrtcvad
+        WEBRTCVAD_AVAILABLE = True
+    except ImportError:
+        WEBRTCVAD_AVAILABLE = False
+    
+    try:
+        import psycopg2
+        HAS_DATABASE = True
+    except ImportError:
+        HAS_DATABASE = False
+    
+    # Get MCI service status
+    mci_status = {}
+    if MCI_MODULES_AVAILABLE:
+        try:
+            status = mci_service.get_status()
+            mci_status = {
+                'available': status.get('is_ready', False),
+                'acoustic_analyzer': status.get('acoustic_analyzer', False),
+                'linguistic_analyzer': status.get('linguistic_analyzer', False),
+                'mci_predictor': status.get('mci_predictor', False)
+            }
+        except:
+            mci_status = {'available': False, 'error': 'Status check failed'}
+    else:
+        mci_status = {'available': False}
+    
+    return jsonify({
+        'status': 'running',
+        'service': 'cognitive-assessment-backend',
+        'timestamp': datetime.now().isoformat(),
+        'modules': {
+            'acoustic_analyzer': mci_status.get('acoustic_analyzer', False),
+            'linguistic_analyzer': mci_status.get('linguistic_analyzer', False),
+            'mci_predictor': mci_status.get('mci_predictor', False),
+            'transcriber': vietnamese_transcriber is not None
+        },
+        'optional_packages': {
+            'webrtcvad': WEBRTCVAD_AVAILABLE,
+            'psycopg2': HAS_DATABASE,
+            'opensmile': False,  # Would need to check if available
+            'phonlp': False,  # Would need to check if available
+        },
+        'apis': {
+            'gemini': bool(gemini_api_key),
+            'openai': openai_client is not None
+        },
+        'mci_service': mci_status
+    }), 200
 
 # =============================================================================
 # MCI SCREENING ENDPOINTS

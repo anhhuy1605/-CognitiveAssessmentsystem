@@ -1,4 +1,3 @@
-import { Footer } from "./footer";
 import Link from "next/link";
 import { Newspaper } from "lucide-react";
 
@@ -18,7 +17,6 @@ const MarketingLayout = ({children}: Props) => {
             <main className="flex-1 overflow-y-auto">
                 {children}
             </main>
-            <Footer />
         </div>
 
     )

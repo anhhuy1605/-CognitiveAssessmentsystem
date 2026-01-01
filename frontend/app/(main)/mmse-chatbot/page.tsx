@@ -110,7 +110,23 @@ interface SessionState {
 // ============================================
 // CONSTANTS
 // ============================================
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5001";
+// Get API URL from environment, with better fallback handling
+const getApiBaseUrl = () => {
+  // Try multiple environment variable names
+  const apiUrl = 
+    process.env.NEXT_PUBLIC_API_URL || 
+    process.env.NEXT_PUBLIC_PYTHON_BACKEND_URL ||
+    (typeof window !== 'undefined' ? window.location.origin.replace(/:\d+$/, ':5001') : 'http://localhost:5001');
+  
+  // In production (Vercel), should never use localhost
+  if (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && apiUrl.includes('localhost')) {
+    console.error('⚠️ API_BASE_URL is using localhost in production! Set NEXT_PUBLIC_API_URL environment variable on Vercel.');
+  }
+  
+  return apiUrl;
+};
+
+const API_BASE_URL = getApiBaseUrl();
 
 const DOMAIN_ICONS: Record<string, string> = {
   ORIENTATION: "🧭",
@@ -143,7 +159,7 @@ export default function MMSEChatbotPage() {
   
   // Session state
   const [session, setSession] = useState<SessionState | null>(null);
-  const [mmseData, setMmseData] = useState<{ domains: MMSEDomain[] } | null>(null);
+  const [mmseData, setMmseData] = useState<{ domains: MMSEDomain[]; metadata?: any } | null>(null);
   
   // Chat state
   const [inputText, setInputText] = useState("");
@@ -196,21 +212,51 @@ export default function MMSEChatbotPage() {
   // ============================================
   const loadMMSEQuestions = async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/mmse/chatbot/questions`);
+      console.log(`📡 Loading MMSE questions from: ${API_BASE_URL}/api/mmse/chatbot/questions`);
+      const response = await fetch(`${API_BASE_URL}/api/mmse/chatbot/questions`, {
+        method: "GET",
+        headers: {
+          "Accept": "application/json",
+        },
+        // Add timeout
+        signal: AbortSignal.timeout(10000), // 10 second timeout
+      });
+      
       if (response.ok) {
         const data = await response.json();
+        console.log("✅ MMSE questions loaded from backend:", data);
         setMmseData(data);
+        return;
+      } else {
+        console.warn(`⚠️ Backend returned ${response.status}, using fallback`);
       }
-    } catch (error) {
-      console.warn("Could not load MMSE questions from backend, using fallback");
-      // Load from local JSON as fallback
-      try {
-        const localData = await fetch("/mmse_audio_questions_standardized.json");
+    } catch (error: any) {
+      if (error.name === 'AbortError') {
+        console.warn("⏰ Request timeout, using fallback");
+      } else {
+        console.warn("⚠️ Could not load MMSE questions from backend, using fallback:", error.message);
+      }
+    }
+    
+    // Fallback: Load from local JSON
+    try {
+      console.log("📄 Loading MMSE questions from local JSON fallback...");
+      const localData = await fetch("/mmse_audio_questions_standardized.json", {
+        signal: AbortSignal.timeout(5000),
+      });
+      
+      if (localData.ok) {
         const json = await localData.json();
-        setMmseData({ domains: json.mmse_vietnamese_chatbot.domains });
-      } catch {
-        console.error("Failed to load MMSE questions");
+        console.log("✅ MMSE questions loaded from local JSON");
+        setMmseData({ 
+          domains: json.mmse_vietnamese_chatbot?.domains || [],
+          metadata: json.mmse_vietnamese_chatbot?.metadata || {},
+        });
+      } else {
+        console.error("❌ Failed to load local JSON:", localData.status);
       }
+    } catch (fallbackError: any) {
+      console.error("❌ Failed to load MMSE questions from both backend and fallback:", fallbackError);
     }
   };
 
