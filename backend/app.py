@@ -641,12 +641,38 @@ mmse_results_db = {}
 # In-memory per-question store keyed by session
 question_results_db = {}
 
+def find_questions_json_path():
+    """
+    Find questions.json file in multiple possible locations.
+    Returns the path if found, None otherwise.
+    """
+    possible_paths = [
+        # Path 1: release_v1/questions.json (relative to backend/)
+        os.path.join(os.path.dirname(__file__), '..', 'release_v1', 'questions.json'),
+        # Path 2: release_v1/questions.json (relative to project root)
+        os.path.join(os.path.dirname(__file__), '..', '..', 'release_v1', 'questions.json'),
+        # Path 3: questions.json in backend directory
+        os.path.join(os.path.dirname(__file__), 'questions.json'),
+        # Path 4: Absolute path in deployment (/app/questions.json)
+        '/app/questions.json',
+        # Path 5: release_v1/questions.json in deployment
+        '/app/release_v1/questions.json',
+    ]
+    
+    for path in possible_paths:
+        if os.path.exists(path):
+            logger.debug(f"✅ Found questions.json at: {path}")
+            return path
+    
+    logger.warning(f"⚠️ questions.json not found. Tried paths: {possible_paths}")
+    return None
+
 def _load_mmse_domains():
     """Load domains and max points from release_v1/questions.json.
     Returns (domains_info_list, total_questions, total_points)."""
     try:
-        questions_path = os.path.join(os.path.dirname(__file__), '..', 'release_v1', 'questions.json')
-        if not os.path.exists(questions_path):
+        questions_path = find_questions_json_path()
+        if not questions_path:
             return [], 0, 30
         with open(questions_path, 'r', encoding='utf-8') as f:
             qdata = json.load(f)
@@ -950,8 +976,8 @@ def process_assessment_background(assessment_data):
         question_domain = "assessment"
         logger.info(f"Looking up question text for question_id: {question_id} (type: {type(question_id)})")
         try:
-            questions_path = os.path.join(os.path.dirname(__file__), '..', 'release_v1', 'questions.json')
-            if os.path.exists(questions_path):
+            questions_path = find_questions_json_path()
+            if questions_path:
                 with open(questions_path, 'r', encoding='utf-8') as f:
                     qdata = json.load(f)
 
@@ -4587,11 +4613,15 @@ def mmse_assess():
 def mmse_get_questions():
     """Get MMSE questions schema"""
     try:
-        # Load the new MMSE domain-based structure
-        questions_path = os.path.join(os.path.dirname(__file__), '..', 'release_v1', 'questions.json')
-        if not os.path.exists(questions_path):
-            # Fallback to legacy structure
-            questions_path = os.path.join(os.path.dirname(__file__), 'questions.json')
+        questions_path = find_questions_json_path()
+        
+        if not questions_path:
+            error_msg = "Questions file not found. Please ensure questions.json exists in release_v1/ or backend/ directory."
+            logger.error(f"❌ {error_msg}")
+            return jsonify({
+                'success': False,
+                'error': error_msg
+            }), 404
 
         logger.info(f"📋 Loading MMSE questions from: {questions_path}")
 
@@ -4959,8 +4989,8 @@ def get_user_assessment_results(identifier):
         # Compute total_questions from questions.json to avoid hard-coding
         total_questions = 12
         try:
-            questions_path = os.path.join(os.path.dirname(__file__), '..', 'release_v1', 'questions.json')
-            if os.path.exists(questions_path):
+            questions_path = find_questions_json_path()
+            if questions_path:
                 with open(questions_path, 'r', encoding='utf-8') as f:
                     qdata = json.load(f)
                 total_questions = sum(len(item.get('questions', [])) for item in qdata if isinstance(item, dict)) or 12

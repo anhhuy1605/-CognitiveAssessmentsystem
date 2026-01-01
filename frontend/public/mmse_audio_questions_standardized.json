@@ -1,0 +1,707 @@
+{
+  "mmse_vietnamese_chatbot": {
+    "version": "2.0_natural_conversation",
+    "greeting_variable": "{greeting}",
+    "metadata": {
+      "test_name": "Mini-Mental State Examination (MMSE) - Chatbot Audio-First",
+      "total_points": 30,
+      "clinical_cutoff": 24,
+      "estimated_duration": "15-20 phút",
+      "validation_source": "Folstein et al. (1975), Bệnh viện Đà Nẵng (2019)"
+    },
+    
+    "conversation_flow": {
+      "introduction": {
+        "message_id": "intro_01",
+        "display_mode": "visible",
+        "chatbot_messages": [
+          "Xin chào {greeting}! Tôi là trợ lý sàng lọc sức khỏe nhận thức.",
+          "Hôm nay chúng ta sẽ cùng trò chuyện và làm một số câu hỏi đơn giản để đánh giá trí nhớ và khả năng tư duy của {greeting} nhé.",
+          "Toàn bộ quá trình sẽ mất khoảng 15-20 phút. {greeting} cảm thấy sẵn sàng chưa?"
+        ],
+        "wait_for_confirmation": true,
+        "next_section": "orientation"
+      }
+    },
+
+    "domains": [
+      {
+        "domain_code": "ORIENTATION",
+        "domain_name": "Định hướng",
+        "max_points": 10,
+        "questions": [
+          {
+            "question_id": "ori_time_01",
+            "question_category": "Định hướng thời gian",
+            "display_mode": "visible",
+            "chatbot_message": "Chào {greeting}! Để bắt đầu, tôi sẽ hỏi {greeting} vài câu đơn giản nhé.\n\nHôm nay là thứ mấy ạ?",
+            "points": 1,
+            "scoring_rule": "Đúng = 1 điểm; Sai hoặc không biết = 0 điểm",
+            "expected_answer_format": "Thứ [hai/ba/tư/năm/sáu/bảy/chủ nhật]",
+            "feedback_templates": {
+              "correct": "Đúng rồi {greeting}! Hôm nay là {user_answer}.",
+              "incorrect": "Cảm ơn {greeting}. Hôm nay là {correct_answer} nhé.",
+              "partial": "Gần đúng rồi {greeting}!"
+            }
+          },
+          {
+            "question_id": "ori_time_02",
+            "question_category": "Định hướng thời gian",
+            "display_mode": "visible",
+            "chatbot_message": "Tiếp theo, {greeting} có nhớ hôm nay là ngày bao nhiêu không?",
+            "points": 1,
+            "scoring_rule": "Đúng = 1 điểm; Sai hoặc không biết = 0 điểm",
+            "expected_answer_format": "Ngày [1-31]",
+            "feedback_templates": {
+              "correct": "Chính xác! Ngày {user_answer}.",
+              "incorrect": "À, hôm nay là ngày {correct_answer} đó {greeting}."
+            }
+          },
+          {
+            "question_id": "ori_time_03",
+            "question_category": "Định hướng thời gian",
+            "display_mode": "visible",
+            "chatbot_message": "Vậy tháng này là tháng mấy nhỉ?",
+            "points": 1,
+            "scoring_rule": "Đúng = 1 điểm; Sai hoặc không biết = 0 điểm",
+            "expected_answer_format": "Tháng [1-12]",
+            "feedback_templates": {
+              "correct": "Tuyệt! Đúng rồi, tháng {user_answer}.",
+              "incorrect": "Chúng ta đang ở tháng {correct_answer} nhé {greeting}."
+            }
+          },
+          {
+            "question_id": "ori_time_04",
+            "question_category": "Định hướng thời gian",
+            "display_mode": "visible",
+            "chatbot_message": "Còn năm nay là năm bao nhiêu {greeting}?",
+            "points": 1,
+            "scoring_rule": "Đúng = 1 điểm; Sai hoặc không biết = 0 điểm",
+            "expected_answer_format": "Năm [yyyy]",
+            "feedback_templates": {
+              "correct": "Đúng rồi! Năm {user_answer}.",
+              "incorrect": "Năm nay là năm {correct_answer} đó {greeting}."
+            }
+          },
+          {
+            "question_id": "ori_time_05",
+            "question_category": "Định hướng thời gian",
+            "display_mode": "visible",
+            "chatbot_message": "Bây giờ là buổi nào trong ngày nhỉ? Sáng, trưa, chiều hay tối?",
+            "points": 1,
+            "scoring_rule": "Đúng = 1 điểm; Cho phép sai lệch ±2 giờ",
+            "expected_answer_format": "Buổi [sáng/trưa/chiều/tối]",
+            "feedback_templates": {
+              "correct": "Đúng rồi {greeting}, đang là buổi {user_answer}.",
+              "incorrect": "Hiện tại đang là buổi {correct_answer} nhé."
+            },
+            "note": "Điều chỉnh từ 'mùa nào' cho phù hợp khí hậu Việt Nam"
+          },
+          {
+            "question_id": "ori_place_01",
+            "question_category": "Định hướng không gian",
+            "display_mode": "visible",
+            "chatbot_message": "Bây giờ chúng ta chuyển sang câu hỏi về địa điểm nhé.\n\n{greeting} đang ở quốc gia nào?",
+            "points": 1,
+            "scoring_rule": "Đúng = 1 điểm; Sai hoặc không biết = 0 điểm",
+            "expected_answer_format": "Việt Nam",
+            "acceptable_answers": ["Việt Nam", "VN", "Nước Việt Nam", "Vietnam"],
+            "feedback_templates": {
+              "correct": "Chính xác! {greeting} đang ở Việt Nam.",
+              "incorrect": "Chúng ta đang ở Việt Nam nhé {greeting}."
+            }
+          },
+          {
+            "question_id": "ori_place_02",
+            "question_category": "Định hướng không gian",
+            "display_mode": "visible",
+            "chatbot_message": "{greeting} đang ở tỉnh hay thành phố nào?",
+            "points": 1,
+            "scoring_rule": "Đúng = 1 điểm; Sai hoặc không biết = 0 điểm",
+            "expected_answer_format": "Tên tỉnh/thành phố",
+            "feedback_templates": {
+              "correct": "Đúng rồi! {greeting} đang ở {user_answer}.",
+              "incorrect": "À, {greeting} đang ở {correct_answer} nhé."
+            }
+          },
+          {
+            "question_id": "ori_place_03",
+            "question_category": "Định hướng không gian",
+            "display_mode": "visible",
+            "chatbot_message": "Vậy quận hay huyện nào nhỉ?",
+            "points": 1,
+            "scoring_rule": "Đúng = 1 điểm; Sai hoặc không biết = 0 điểm",
+            "expected_answer_format": "Tên quận/huyện",
+            "feedback_templates": {
+              "correct": "Tốt lắm! Đúng rồi.",
+              "incorrect": "Khu vực này là {correct_answer} đó {greeting}."
+            }
+          },
+          {
+            "question_id": "ori_place_04",
+            "question_category": "Định hướng không gian",
+            "display_mode": "visible",
+            "chatbot_message": "{greeting} có biết đây là miền nào không? Miền Bắc, Trung hay Nam?",
+            "points": 1,
+            "scoring_rule": "Đúng = 1 điểm; Sai hoặc không biết = 0 điểm",
+            "expected_answer_format": "Miền [Bắc/Trung/Nam]",
+            "acceptable_answers": ["Miền Bắc", "Bắc", "Miền Trung", "Trung", "Miền Nam", "Nam"],
+            "feedback_templates": {
+              "correct": "Đúng! Đây là Miền {user_answer}.",
+              "incorrect": "Đây là Miền {correct_answer} nhé {greeting}."
+            }
+          },
+          {
+            "question_id": "ori_place_05",
+            "question_category": "Định hướng không gian",
+            "display_mode": "visible",
+            "chatbot_message": "Câu cuối cùng phần này: {greeting} đang ở chỗ nào? Ví dụ như ở nhà riêng, bệnh viện, hay đâu đó?",
+            "points": 1,
+            "scoring_rule": "Đúng = 1 điểm; Sai hoặc không biết = 0 điểm",
+            "expected_answer_format": "Tên địa điểm cụ thể",
+            "acceptable_answers_type": "flexible",
+            "feedback_templates": {
+              "correct": "Cảm ơn {greeting}! Vậy là {greeting} đang ở {user_answer}.",
+              "incorrect": "À, {greeting} đang ở {correct_answer} nhé."
+            }
+          }
+        ]
+      },
+
+      {
+        "domain_code": "REGISTRATION",
+        "domain_name": "Ghi nhận - Nhớ ngay",
+        "max_points": 3,
+        "questions": [
+          {
+            "question_id": "reg_01",
+            "question_category": "Nhớ lại ngay (Immediate Recall)",
+            "display_mode": "hidden_until_response",
+            "conversation_sequence": [
+              {
+                "step": 1,
+                "message_type": "introduction",
+                "display_mode": "visible",
+                "chatbot_message": "Tốt lắm! Bây giờ chúng ta sẽ làm bài kiểm tra trí nhớ nhé.\n\nTôi sẽ đọc 3 từ, {greeting} hãy chú ý lắng nghe rồi nhắc lại. {greeting} sẵn sàng chưa?"
+              },
+              {
+                "step": 2,
+                "message_type": "audio_presentation",
+                "display_mode": "hidden_until_response",
+                "chatbot_message": "Tôi đọc nhé:",
+                "audio_content": "[TTS reads slowly: Con mèo... Chiếc xe... Cây lúa]",
+                "hidden_content": ["Con mèo", "Chiếc xe", "Cây lúa"],
+                "presentation_rate": "1 giây/từ",
+                "internal_note": "Người dùng KHÔNG nhìn thấy 3 từ này cho đến khi trả lời"
+              },
+              {
+                "step": 3,
+                "message_type": "prompt_recall",
+                "display_mode": "visible",
+                "chatbot_message": "Bây giờ {greeting} nhắc lại 3 từ vừa nghe được không?"
+              },
+              {
+                "step": 4,
+                "message_type": "feedback_and_reveal",
+                "display_mode": "after_user_response",
+                "reveal_condition": "after_user_submission",
+                "feedback_templates": {
+                  "correct_3": "Tuyệt vời! {greeting} nhớ đúng cả 3 từ rồi. Đáp án là: **Con mèo, Chiếc xe, Cây lúa**",
+                  "correct_2": "Rất tốt! {greeting} nhớ được 2/3 từ. Ba từ là: **Con mèo, Chiếc xe, Cây lúa**",
+                  "correct_1": "Được rồi! {greeting} nhớ được 1/3 từ. Ba từ đúng là: **Con mèo, Chiếc xe, Cây lúa**",
+                  "correct_0": "Không sao! Ba từ đó là: **Con mèo, Chiếc xe, Cây lúa**"
+                }
+              },
+              {
+                "step": 5,
+                "message_type": "repetition_for_encoding",
+                "display_mode": "visible",
+                "chatbot_message": "Tôi sẽ đọc lại 3 từ một lần nữa để {greeting} ghi nhớ tốt hơn nhé.\n\n[TTS: Con mèo... Chiếc xe... Cây lúa]\n\n**Rất quan trọng:** {greeting} hãy cố nhớ 3 từ này nhé, vì chút nữa tôi sẽ hỏi lại đó!",
+                "repetition_protocol": "Cho lặp lại tối đa 5 lần nếu cần",
+                "internal_note": "Lần này có thể hiển thị 3 từ để củng cố"
+              }
+            ],
+            "points": 3,
+            "scoring_rule": "Mỗi từ nhắc đúng = 1 điểm (chỉ tính lần đầu)",
+            "scoring_details": {
+              "Con mèo": 1,
+              "Chiếc xe": 1,
+              "Cây lúa": 1
+            },
+            "fuzzy_matching": {
+              "enabled": true,
+              "acceptable_variations": {
+                "Con mèo": ["mèo", "con mèo"],
+                "Chiếc xe": ["xe", "chiếc xe", "cái xe"],
+                "Cây lúa": ["lúa", "cây lúa"]
+              }
+            }
+          }
+        ]
+      },
+
+      {
+        "domain_code": "ATTENTION_CALCULATION",
+        "domain_name": "Sự chú ý và Tính toán",
+        "max_points": 5,
+        "questions": [
+          {
+            "question_id": "attn_serial_sub",
+            "question_category": "Phép tính nối tiếp (Serial Subtraction)",
+            "display_mode": "interactive_step_by_step",
+            "conversation_sequence": [
+              {
+                "step": 1,
+                "message_type": "introduction",
+                "chatbot_message": "Bây giờ {greeting} thử làm phép tính với tôi nhé.\n\nTôi muốn {greeting} thực hiện phép trừ 7 liên tục. Bắt đầu từ số 100, trừ đi 7, rồi lấy kết quả tiếp tục trừ 7 nữa, cứ thế cho đến khi tôi nói dừng.\n\n{greeting} hiểu rồi chứ?"
+              },
+              {
+                "step": 2,
+                "message_type": "wait_confirmation",
+                "wait_for_user": true,
+                "proceed_on": ["có", "hiểu", "rồi", "được", "ok", "ừ"]
+              },
+              {
+                "step": 3,
+                "message_type": "start_calculation",
+                "chatbot_message": "Tốt! Vậy bắt đầu nhé.\n\n100 trừ 7 bằng bao nhiêu?"
+              },
+              {
+                "step": 4,
+                "message_type": "continue_sequence",
+                "sequence_prompts": [
+                  "Tiếp tục trừ 7 nữa nhé.",
+                  "Kết quả vừa rồi trừ 7 bằng bao nhiêu?",
+                  "Tiếp tục trừ 7...",
+                  "Lại trừ 7 nữa.",
+                  "Còn một phép nữa, trừ 7."
+                ],
+                "internal_note": "KHÔNG hiển thị đáp án đúng trong quá trình làm"
+              },
+              {
+                "step": 5,
+                "message_type": "completion_feedback",
+                "chatbot_message": "Tốt lắm {greeting}! Chúng ta đã hoàn thành phần tính toán.",
+                "show_results": false,
+                "internal_note": "Kết quả được lưu nội bộ, không hiển thị điểm ngay"
+              }
+            ],
+            "points": 5,
+            "correct_sequence": [93, 86, 79, 72, 65],
+            "scoring_rule": "Mỗi phép trừ đúng = 1 điểm. Nếu sai một phép, vẫn cho điểm các phép sau nếu logic trừ 7 đúng",
+            "error_handling": {
+              "partial_credit": true,
+              "logic_based_scoring": true,
+              "example": "93→85→78→71→64 vẫn cho 4/5 điểm (trừ phép đầu)"
+            }
+          },
+          {
+            "question_id": "attn_backward_spell",
+            "question_category": "Đánh vần ngược (Alternative)",
+            "display_mode": "conditional",
+            "trigger_condition": "if_calculation_failed",
+            "chatbot_message": "Không sao {greeting}. Chúng ta thử cách khác nhé.\n\n{greeting} hãy đánh vần ngược từ 'KHÔNG'. Tức là đánh vần từ cuối lên đầu: K-H-Ô-N-G thành G-N-Ô-H-K.\n\n{greeting} thử nhé!",
+            "points": 5,
+            "correct_sequence": ["G", "N", "Ô", "H", "K"],
+            "scoring_rule": "Mỗi chữ đúng vị trí = 1 điểm",
+            "note": "Chỉ dùng nếu không thể làm phép tính"
+          }
+        ]
+      },
+
+      {
+        "domain_code": "SUPPLEMENTARY_OPEN_QUESTIONS",
+        "domain_name": "Câu hỏi mở - Thu thập đặc trưng ngôn ngữ",
+        "max_points": 0,
+        "clinical_purpose": "Thu thập dữ liệu cho phân tích TTR, MLU, Semantic Coherence",
+        "note": "Phần này KHÔNG tính điểm MMSE, chỉ để trích xuất linguistic features",
+        "questions": [
+          {
+            "question_id": "open_01_daily_routine",
+            "question_category": "Miêu tả sinh hoạt hàng ngày",
+            "display_mode": "visible",
+            "chatbot_message": "Bây giờ {greeting} kể cho tôi nghe về một ngày bình thường của {greeting} nhé.\n\nTừ lúc thức dậy buổi sáng đến lúc đi ngủ tối, {greeting} thường làm những gì?",
+            "target_length": "100-200 từ",
+            "encouragement_prompts": [
+              "Hay quá! {greeting} kể tiếp đi.",
+              "Còn nữa không {greeting}?",
+              "Buổi chiều {greeting} làm gì?",
+              "Thú vị nhỉ! Còn gì nữa không?"
+            ],
+            "linguistic_features_collected": [
+              "Type-Token Ratio (TTR)",
+              "Mean Length of Utterance (MLU)",
+              "Pronoun Ratio",
+              "Concrete Noun Rate",
+              "Semantic Coherence",
+              "Incomplete Sentence Ratio"
+            ],
+            "scoring": "Không tính điểm MMSE"
+          },
+          {
+            "question_id": "open_02_living_area",
+            "question_category": "Miêu tả không gian sống",
+            "display_mode": "visible",
+            "chatbot_message": "{greeting} có thể mô tả cho tôi biết khu vực {greeting} đang sống không?\n\nXung quanh nhà {greeting} có những gì?",
+            "target_length": "50-100 từ",
+            "encouragement_prompts": [
+              "Nghe hay đó! Còn gì nữa không?",
+              "Xung quanh thì sao {greeting}?"
+            ],
+            "linguistic_features_collected": [
+              "Concrete Noun Rate",
+              "Idea Density",
+              "Spatial Language Use"
+            ],
+            "scoring": "Không tính điểm MMSE"
+          },
+          {
+            "question_id": "open_03_hobbies",
+            "question_category": "Sở thích cá nhân",
+            "display_mode": "visible",
+            "chatbot_message": "{greeting} thích làm gì trong lúc rảnh rỗi?\n\nHãy kể cho tôi nghe về sở thích của {greeting} đi.",
+            "target_length": "50-100 từ",
+            "encouragement_prompts": [
+              "Thú vị nhỉ!",
+              "{greeting} làm việc đó thường xuyên không?",
+              "Còn sở thích nào khác không?"
+            ],
+            "linguistic_features_collected": [
+              "Lexical Diversity",
+              "Emotional Expression",
+              "Topic Maintenance"
+            ],
+            "scoring": "Không tính điểm MMSE"
+          },
+          {
+            "question_id": "open_04_family",
+            "question_category": "Ký ức gia đình",
+            "display_mode": "visible",
+            "chatbot_message": "{greeting} có thể kể cho tôi nghe về gia đình của {greeting} không?\n\nCó bao nhiêu người? Họ làm nghề gì?",
+            "target_length": "100-150 từ",
+            "encouragement_prompts": [
+              "Gia đình {greeting} nghe ấm cúng nhỉ!",
+              "Còn ai nữa không?",
+              "Thật tuyệt! {greeting} kể tiếp đi."
+            ],
+            "linguistic_features_collected": [
+              "Semantic Coherence",
+              "Pronoun Usage",
+              "Long-term Memory Retrieval",
+              "Narrative Structure"
+            ],
+            "scoring": "Không tính điểm MMSE"
+          }
+        ]
+      },
+
+      {
+        "domain_code": "RECALL",
+        "domain_name": "Trí nhớ - Nhớ lại sau trì hoãn",
+        "max_points": 3,
+        "delay_requirement": "≥5 phút sau Registration",
+        "questions": [
+          {
+            "question_id": "recall_01",
+            "question_category": "Nhớ lại có trì hoãn (Delayed Recall)",
+            "display_mode": "hidden_until_response",
+            "conversation_sequence": [
+              {
+                "step": 1,
+                "message_type": "prompt_recall",
+                "display_mode": "visible",
+                "chatbot_message": "{greeting} ơi, nhớ lúc đầu tôi có đọc 3 từ không?\n\nBây giờ {greeting} thử nhắc lại xem, không cần đúng thứ tự đâu."
+              },
+              {
+                "step": 2,
+                "message_type": "wait_response",
+                "hidden_content": ["Con mèo", "Chiếc xe", "Cây lúa"],
+                "internal_note": "KHÔNG hiển thị đáp án cho đến khi user trả lời"
+              },
+              {
+                "step": 3,
+                "message_type": "feedback_and_reveal",
+                "display_mode": "after_user_response",
+                "reveal_condition": "after_user_submission",
+                "feedback_templates": {
+                  "correct_3": "Tuyệt vời lắm {greeting}! {greeting} nhớ đúng cả 3 từ. Ba từ là: **Con mèo, Chiếc xe, Cây lúa**",
+                  "correct_2": "Rất tốt! {greeting} nhớ được 2/3 từ. Ba từ là: **Con mèo, Chiếc xe, Cây lúa**",
+                  "correct_1": "Được rồi! {greeting} nhớ được 1/3 từ. Ba từ đúng là: **Con mèo, Chiếc xe, Cây lúa**",
+                  "correct_0": "Không sao {greeting}. Ba từ đó là: **Con mèo, Chiếc xe, Cây lúa**"
+                }
+              }
+            ],
+            "points": 3,
+            "scoring_rule": "Mỗi từ nhớ đúng = 1 điểm. Không cần đúng thứ tự",
+            "no_prompting": true,
+            "scoring_details": {
+              "Con mèo": 1,
+              "Chiếc xe": 1,
+              "Cây lúa": 1
+            },
+            "clinical_significance": "Marker quan trọng nhất cho Alzheimer sớm"
+          }
+        ]
+      },
+
+      {
+        "domain_code": "LANGUAGE",
+        "domain_name": "Ngôn ngữ",
+        "max_points": 8,
+        "questions": [
+          {
+            "question_id": "lang_naming_01",
+            "question_category": "Đặt tên đồ vật",
+            "display_mode": "visible",
+            "audio_adaptation": true,
+            "chatbot_message": "Bây giờ tôi sẽ mô tả một đồ vật, {greeting} cho biết đó là gì nhé.\n\nĐồ vật này: Hình tròn, đeo ở tay, dùng để xem giờ.\n\n{greeting} biết đó là gì không?",
+            "points": 1,
+            "expected_answer": "Đồng hồ",
+            "acceptable_answers": ["đồng hồ", "cái đồng hồ", "đồng hồ đeo tay"],
+            "scoring_rule": "Đặt tên chính xác = 1 điểm",
+            "feedback_templates": {
+              "correct": "Chính xác! Đó là đồng hồ.",
+              "incorrect": "Đó là đồng hồ nhé {greeting}."
+            }
+          },
+          {
+            "question_id": "lang_naming_02",
+            "question_category": "Đặt tên đồ vật",
+            "display_mode": "visible",
+            "audio_adaptation": true,
+            "chatbot_message": "Tiếp theo nhé.\n\nĐồ vật này: Dùng để viết, có mực bên trong, cầm trên tay.\n\n{greeting} biết đó là gì không?",
+            "points": 1,
+            "expected_answer": "Cây viết hoặc Bút",
+            "acceptable_answers": ["bút", "cây viết", "bút bi", "bút mực"],
+            "scoring_rule": "Đặt tên chính xác = 1 điểm",
+            "feedback_templates": {
+              "correct": "Đúng rồi! Đó là {user_answer}.",
+              "incorrect": "Đó là bút (hoặc cây viết) nhé {greeting}."
+            }
+          },
+          {
+            "question_id": "lang_repetition",
+            "question_category": "Lặp lại cụm từ",
+            "display_mode": "hidden_until_response",
+            "conversation_sequence": [
+              {
+                "step": 1,
+                "chatbot_message": "Bây giờ {greeting} hãy lắng nghe và nhắc lại chính xác câu tôi nói nhé.\n\nChú ý: phải nhắc lại y hệt, không thiếu không thừa từ nào."
+              },
+              {
+                "step": 2,
+                "chatbot_message": "Tôi nói nhé:\n\n[TTS: Không có nếu, và hoặc nhưng gì cả]",
+                "hidden_content": "Không có nếu, và hoặc nhưng gì cả",
+                "display_mode": "audio_only"
+              },
+              {
+                "step": 3,
+                "chatbot_message": "{greeting} nhắc lại nhé!"
+              },
+              {
+                "step": 4,
+                "message_type": "feedback",
+                "reveal_after_response": true,
+                "feedback_templates": {
+                  "correct": "Hoàn hảo! {greeting} nhắc lại chính xác: **Không có nếu, và hoặc nhưng gì cả**",
+                  "incorrect": "Gần đúng rồi {greeting}. Câu đúng là: **Không có nếu, và hoặc nhưng gì cả**"
+                }
+              }
+            ],
+            "points": 1,
+            "expected_answer": "Không có nếu, và hoặc nhưng gì cả",
+            "scoring_rule": "Phải lặp lại chính xác 100%, thiếu hoặc thêm bất kỳ từ nào = 0 điểm"
+          },
+          {
+            "question_id": "lang_comprehension_3step",
+            "question_category": "Hiểu ngôn ngữ nói - 3 bước",
+            "display_mode": "visible",
+            "audio_adaptation": true,
+            "chatbot_message": "Bây giờ tôi sẽ yêu cầu {greeting} làm 3 việc bằng cách NÓI.\n\n**Thứ nhất:** Nói 'Tôi hiểu rồi'\n**Thứ hai:** Đếm từ 1 đến 3\n**Thứ ba:** Nói 'Xong rồi'\n\n{greeting} hãy làm theo thứ tự nhé. Bắt đầu!",
+            "points": 3,
+            "scoring_details": {
+              "step_1": "Nói 'Tôi hiểu rồi' = 1 điểm",
+              "step_2": "Đếm từ 1 đến 3 = 1 điểm",
+              "step_3": "Nói 'Xong rồi' = 1 điểm"
+            },
+            "scoring_rule": "Mỗi bước đúng và đúng thứ tự = 1 điểm",
+            "sequence_validation": {
+              "correct_order": true,
+              "allow_variations": {
+                "step_1": ["tôi hiểu rồi", "hiểu rồi", "em hiểu rồi"],
+                "step_2": ["một hai ba", "1 2 3", "một, hai, ba"],
+                "step_3": ["xong rồi", "xong", "hoàn thành"]
+              }
+            },
+            "feedback_templates": {
+              "correct_3": "Xuất sắc {greeting}! {greeting} làm đúng cả 3 bước theo thứ tự.",
+              "correct_2": "Tốt lắm! {greeting} làm đúng 2/3 bước.",
+              "correct_1": "Được rồi! {greeting} làm đúng 1/3 bước.",
+              "correct_0": "Không sao {greeting}. Ba bước đó là: Nói 'Tôi hiểu rồi' → Đếm 1-2-3 → Nói 'Xong rồi'."
+            }
+          },
+          {
+            "question_id": "lang_comprehension_listening",
+            "question_category": "Hiểu nghĩa câu qua nghe",
+            "display_mode": "visible",
+            "audio_adaptation": true,
+            "chatbot_message": "Tôi sẽ đọc một câu, {greeting} lắng nghe rồi trả lời câu hỏi nhé.\n\nCâu này là: 'Con ong chăm chỉ bay qua vườn hoa.'\n\n{greeting} cho biết con ong đang làm gì?",
+            "points": 1,
+            "expected_answer_type": "Mô tả hành động",
+            "acceptable_answers": [
+              "đang bay qua vườn hoa",
+              "bay qua vườn",
+              "đang bay",
+              "bay",
+              "chăm chỉ bay"
+            ],
+            "scoring_rule": "Trả lời đúng hành động hoặc ý nghĩa chủ thể = 1 điểm",
+            "feedback_templates": {
+              "correct": "Đúng rồi {greeting}! Con ong đang bay qua vườn hoa.",
+              "incorrect": "Con ong trong câu đang bay qua vườn hoa nhé {greeting}."
+            }
+          },
+          {
+            "question_id": "lang_sentence_production",
+            "question_category": "Tạo câu hoàn chỉnh",
+            "display_mode": "visible",
+            "audio_adaptation": true,
+            "chatbot_message": "Bây giờ {greeting} hãy nói một câu hoàn chỉnh về thời tiết hôm nay.\n\nCâu của {greeting} cần có chủ ngữ và vị ngữ, phải có nghĩa nhé.",
+            "points": 1,
+            "scoring_rule": "Câu có chủ ngữ + vị ngữ + nghĩa rõ ràng = 1 điểm",
+            "validation_criteria": {
+              "has_subject": true,
+              "has_predicate": true,
+              "is_meaningful": true,
+              "on_topic": "weather"
+            },
+            "examples": {
+              "correct": [
+                "Hôm nay trời nắng đẹp",
+                "Trời đang mưa",
+                "Thời tiết hôm nay mát mẻ"
+              ],
+              "incorrect": [
+                "Nắng (thiếu chủ ngữ)",
+                "Hôm nay đẹp (không rõ nghĩa)",
+                "Không biết nói gì"
+              ]
+            },
+            "feedback_templates": {
+              "correct": "Tuyệt! {greeting} tạo câu rất tốt: '{user_answer}'",
+              "incorrect": "Câu của {greeting} cần có chủ ngữ và vị ngữ rõ ràng hơn nhé. Ví dụ: 'Hôm nay trời nắng đẹp'."
+            }
+          }
+        ]
+      },
+
+      {
+        "domain_code": "VISUOSPATIAL",
+        "domain_name": "Khả năng hình dung không gian",
+        "max_points": 1,
+        "questions": [
+          {
+            "question_id": "visual_spatial_01",
+            "question_category": "Tưởng tượng không gian",
+            "display_mode": "visible",
+            "audio_adaptation": true,
+            "chatbot_message": "{greeting} thử tưởng tượng nhé.\n\nCó hai hình vuông: một cái để ngay ngắn, cái kia đặt chéo lên trên. Khi chồng lại, nó sẽ thành một hình có nhiều đầu nhọn.\n\n{greeting} có thể kể lại hình đó giống cái gì không?",
+            "points": 1,
+            "scoring_rule": "Mô tả chính xác cấu trúc không gian hoặc nhận biết được hình = 1 điểm",
+            "acceptable_answers": [
+              "hai hình vuông chồng nhau tạo thành hình sao",
+              "hình sao tám cánh",
+              "giống hình kim cương chồng lên nhau",
+              "có nhiều góc nhọn như ngôi sao",
+              "hình sao",
+              "ngôi sao"
+            ],
+            "feedback_templates": {
+              "correct": "Tuyệt vời {greeting}! Đúng rồi, hình đó giống như {user_answer}.",
+              "incorrect": "Hình đó khi hai hình vuông chồng lên nhau sẽ tạo thành hình sao có nhiều góc nhọn nhé {greeting}."
+            },
+            "note": "Điều chỉnh từ vẽ hình sang mô tả bằng lời cho audio-only"
+          }
+        ]
+      }
+    ],
+
+    "completion": {
+      "message_id": "completion_01",
+      "chatbot_message": "Tuyệt vời {greeting}! Chúng ta đã hoàn thành tất cả các câu hỏi rồi.\n\nCảm ơn {greeting} đã dành thời gian tham gia. Kết quả sẽ được phân tích và {greeting} sẽ nhận được thông tin phản hồi sớm nhé.",
+      "internal_actions": [
+        "Calculate total MMSE score",
+        "Extract linguistic features from open questions",
+        "Compute TTR, MLU, Pronoun Ratio, etc.",
+        "Generate comprehensive report"
+      ]
+    },
+
+    "technical_specifications": {
+      "hidden_content_mechanism": {
+        "description": "Cơ chế ẩn/hiện nội dung cho memory tests",
+        "implementation": {
+          "registration": "Hide 3 words until user responds",
+          "recall": "Hide 3 words until user responds",
+          "serial_subtraction": "Hide correct answers during process",
+          "repetition": "Hide target phrase until after response"
+        },
+        "reveal_trigger": "after_user_submission",
+        "display_in_feedback": true
+      },
+      "fuzzy_matching": {
+        "enabled": true,
+        "tolerance": "Vietnamese variations, accents, word order",
+        "examples": {
+          "Con mèo": ["mèo", "con mèo", "con meo"],
+          "Chiếc xe": ["xe", "chiếc xe", "cái xe"]
+        }
+      },
+      "linguistic_feature_extraction": {
+        "min_word_count": 50,
+        "target_word_count": 200,
+        "features": [
+          "Type-Token Ratio (TTR)",
+          "Pronoun Ratio",
+          "Concrete Noun Rate",
+          "Mean Length of Utterance (MLU)",
+          "Incomplete Sentence Ratio",
+          "Semantic Coherence",
+          "Idea Density"
+        ],
+        "tools": [
+          "VnCoreNLP for tokenization",
+          "PhoBERT for embeddings",
+          "Custom Vietnamese POS tagger"
+        ]
+      },
+      "scoring_system": {
+        "total_points": 30,
+        "real_time_calculation": false,
+        "display_to_user": "Only at completion",
+        "domain_scores_tracked": true
+      }
+    },
+
+    "conversation_principles": {
+      "tone": "Ấm áp, thân thiện, khuyến khích",
+      "greeting_consistency": "Sử dụng {greeting} xuyên suốt",
+      "no_harsh_corrections": "Luôn động viên, không phê phán",
+      "natural_flow": "Giống trò chuyện thực, không khô khan",
+      "wait_for_response": "Không vội vàng, cho user thời gian",
+      "encouragement": "Khen ngợi nỗ lực, không chỉ kết quả",
+      "empathy": "Thể hiện sự quan tâm và hỗ trợ"
+    },
+
+    "quality_checklist": {
+      "greeting_variable": "✓ Tất cả câu dùng {greeting}",
+      "no_hardcoded_pronouns": "✓ Không còn ông/bà, anh/chị",
+      "hidden_content": "✓ Memory tests ẨN nội dung đến khi user trả lời",
+      "natural_tone": "✓ Giọng điệu thân thiện, tự nhiên",
+      "mmse_sequence": "✓ Đúng thứ tự MMSE chuẩn Folstein 1975",
+      "scoring_criteria": "✓ Đúng tiêu chí chấm điểm",
+      "open_questions": "✓ Có câu hỏi mở thu thập 100-200 từ",
+      "dynamic_feedback": "✓ Phản hồi động dựa trên câu trả lời"
+    }
+  }
+}
