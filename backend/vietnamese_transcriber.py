@@ -81,24 +81,34 @@ class AudioProcessor:
             
             import librosa
             import noisereduce as nr
-            import webrtcvad
+            
+            # Try to import webrtcvad (optional, requires gcc)
+            try:
+                import webrtcvad
+                self.vad = webrtcvad.Vad(3)  # Aggressiveness level 3
+                self.has_webrtcvad = True
+                logger.info("✅ Audio processor initialized with webrtcvad")
+            except ImportError:
+                self.vad = None
+                self.has_webrtcvad = False
+                logger.info("⚠️ webrtcvad not available - will use librosa fallback for VAD")
             
             self.librosa = librosa
             self.nr = nr
-            self.vad = webrtcvad.Vad(3)  # Aggressiveness level 3
             self.is_initialized = True
-            logger.info("✅ Audio processor initialized")
             
         except Exception as e:
             logger.error(f"❌ Failed to initialize audio processor: {e}")
             self.is_initialized = False
+            self.vad = None
+            self.has_webrtcvad = False
     
     def _install_audio_dependencies(self):
         """Cài đặt các thư viện audio processing - chỉ chạy nếu cần"""
         packages = [
             "librosa>=0.10.0",
-            "noisereduce>=3.0.0", 
-            "webrtcvad>=2.0.10",
+            "noisereduce>=3.0.0",
+            # Removed webrtcvad - requires gcc and causes build issues
             "soundfile>=0.12.1",
             "scipy>=1.9.0"
         ]
@@ -174,64 +184,87 @@ class AudioProcessor:
     def _apply_vad(self, audio: np.ndarray, sr: int) -> np.ndarray:
         """Áp dụng Voice Activity Detection với timeout"""
         try:
-            import threading
-            import time
-            
-            result = [audio]  # Default fallback
-            exception = [None]
-            
-            def vad_worker():
-                try:
-                    # Convert to 16-bit PCM for webrtcvad
-                    audio_16bit = (audio * 32767).astype(np.int16).tobytes()
-                    
-                    # Frame duration in ms
-                    frame_duration = 30  # ms
-                    frame_length = int(sr * frame_duration / 1000)
-                    
-                    # Process frames
-                    voiced_frames = []
-                    frame_count = 0
-                    max_frames = min(1000, len(audio_16bit) // (frame_length * 2))  # Limit frames
-                    
-                    for i in range(0, len(audio_16bit), frame_length * 2):
-                        if frame_count >= max_frames:
-                            break
-                            
-                        frame = audio_16bit[i:i + frame_length * 2]
-                        if len(frame) == frame_length * 2:
-                            is_speech = self.vad.is_speech(frame, sr)
-                            if is_speech:
-                                start_sample = i // 2
-                                end_sample = start_sample + frame_length
-                                voiced_frames.append(audio[start_sample:end_sample])
-                        frame_count += 1
-                    
-                    if voiced_frames:
-                        result[0] = np.concatenate(voiced_frames)
-                    else:
-                        result[0] = audio  # Use original if no speech detected
-                        
-                except Exception as e:
-                    exception[0] = e
-            
-            # Run VAD with timeout
-            thread = threading.Thread(target=vad_worker)
-            thread.daemon = True
-            thread.start()
-            thread.join(timeout=10)  # 10 second timeout
-            
-            if thread.is_alive():
-                logger.warning("⚠️ VAD timeout, using original audio")
-                return audio
-            elif exception[0]:
-                logger.warning(f"⚠️ VAD failed: {exception[0]}")
-                return audio
+            # Use webrtcvad if available, otherwise use librosa fallback
+            if self.has_webrtcvad and self.vad is not None:
+                return self._apply_webrtc_vad(audio, sr)
             else:
-                return result[0]
-                
+                # Fallback to librosa-based VAD
+                return self._apply_librosa_vad(audio, sr)
         except Exception as e:
             logger.warning(f"⚠️ VAD failed: {e}")
+            return audio
+    
+    def _apply_webrtc_vad(self, audio: np.ndarray, sr: int) -> np.ndarray:
+        """Apply webrtcvad-based VAD"""
+        import threading
+        import time
+        
+        result = [audio]  # Default fallback
+        exception = [None]
+        
+        def vad_worker():
+            try:
+                # Convert to 16-bit PCM for webrtcvad
+                audio_16bit = (audio * 32767).astype(np.int16).tobytes()
+                
+                # Frame duration in ms
+                frame_duration = 30  # ms
+                frame_length = int(sr * frame_duration / 1000)
+                
+                # Process frames
+                voiced_frames = []
+                frame_count = 0
+                max_frames = min(1000, len(audio_16bit) // (frame_length * 2))  # Limit frames
+                
+                for i in range(0, len(audio_16bit), frame_length * 2):
+                    if frame_count >= max_frames:
+                        break
+                        
+                    frame = audio_16bit[i:i + frame_length * 2]
+                    if len(frame) == frame_length * 2:
+                        is_speech = self.vad.is_speech(frame, sr)
+                        if is_speech:
+                            start_sample = i // 2
+                            end_sample = start_sample + frame_length
+                            voiced_frames.append(audio[start_sample:end_sample])
+                    frame_count += 1
+                
+                if voiced_frames:
+                    result[0] = np.concatenate(voiced_frames)
+                else:
+                    result[0] = audio  # Use original if no speech detected
+                    
+            except Exception as e:
+                exception[0] = e
+        
+        # Run VAD with timeout
+        thread = threading.Thread(target=vad_worker)
+        thread.daemon = True
+        thread.start()
+        thread.join(timeout=10)  # 10 second timeout
+        
+        if thread.is_alive():
+            logger.warning("⚠️ VAD timeout, using original audio")
+            return audio
+        elif exception[0]:
+            logger.warning(f"⚠️ VAD failed: {exception[0]}")
+            return audio
+        else:
+            return result[0]
+    
+    def _apply_librosa_vad(self, audio: np.ndarray, sr: int) -> np.ndarray:
+        """Fallback VAD using librosa (no webrtcvad available)"""
+        try:
+            # Use librosa's voice activity detection
+            intervals = self.librosa.effects.split(audio, top_db=30)
+            if len(intervals) > 0:
+                # Concatenate all voice intervals
+                voiced_audio = np.concatenate([audio[start:end] for start, end in intervals])
+                return voiced_audio if len(voiced_audio) > 0 else audio
+            else:
+                return audio
+        except Exception as e:
+            logger.warning(f"⚠️ Librosa VAD failed: {e}")
             return audio
     
     def _normalize_audio(self, audio: np.ndarray) -> np.ndarray:
