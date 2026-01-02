@@ -2045,8 +2045,8 @@ Trả về JSON với format:
         # 2. Main question text - check for memory recall words to hide
         if question_text:
             # ✅ FIX: Hide "Con mèo, Chiếc xe, Cây lúa" from display but keep in TTS
-        question_id = question.get("question_id", "").lower()
-        is_recall = "recall" in question_id or "rec_" in question_id
+            question_id = question.get("question_id", "").lower()
+            is_recall = "recall" in question_id or "rec_" in question_id
         
         if is_recall:
             # Hide memory words from display
