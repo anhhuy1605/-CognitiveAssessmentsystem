@@ -2022,15 +2022,15 @@ Trả về JSON với format:
         
         # Helper to check if content should be hidden from display
         def is_hidden_display(field_name: str, default: bool = False) -> bool:
-        if f"{field_name}_hidden" in question:
+            if f"{field_name}_hidden" in question:
             return question.get(f"{field_name}_hidden", default)
-        return question.get("hidden_display", default)
+            return question.get("hidden_display", default)
         
         # Helper to check if content should be hidden from audio (not read by TTS)
         def is_hidden_audio(field_name: str, default: bool = False) -> bool:
-        if f"{field_name}_tts" in question:
+            if f"{field_name}_tts" in question:
             return not question.get(f"{field_name}_tts", True)  # Inverted: tts=True means not hidden
-        return question.get("hidden_audio", default)
+            return question.get("hidden_audio", default)
         
         # 1. Instruction - check instruction_hidden and instruction_tts flags
         instruction = question.get("instruction", "")
