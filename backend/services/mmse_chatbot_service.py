@@ -394,55 +394,34 @@ class MMSEChatbotService:
         
         # ✅ v2.1_CORRECTED: Handle instruction fields (instruction_part1, instruction_part2)
         # For registration domain, combine instruction_part1 and instruction_part2
+        # ✅ NEW: Use helper method to build display and TTS text with hidden flags
         actual_question_id = question.get("question_id", f"{domain.value}_{index}")
-        if domain == TestDomain.REGISTRATION and index == 0:
-            message_parts = []
-            
-            # 1. Instruction
-            instruction = question.get("instruction", "")
-            if instruction:
-                instruction = self._replace_greeting(instruction, state.greeting)
-                message_parts.append(instruction)
-            
-            # 2. Question (main question text)
-            if question_text:
-                message_parts.append(question_text)
-            
-            # 3. Words announcement (for registration)
-            words_announcement = question.get("words_announcement", "")
-            if words_announcement:
-                # Remove markdown bold if present (safety check)
-                words_announcement = words_announcement.replace("**", "")
-                words_announcement = self._replace_greeting(words_announcement, state.greeting)
-                message_parts.append(words_announcement)
-            
-            # 4. Instruction after (for registration)
-            instruction_after = question.get("instruction_after", "")
-            if instruction_after:
-                instruction_after = self._replace_greeting(instruction_after, state.greeting)
-                message_parts.append(instruction_after)
-            
-            # Join with double newline for clear separation
-            question_text = "\n\n".join(part for part in message_parts if part)
-        elif index == 0:
-            # For other domains, use single instruction field
-            instruction = question.get("instruction", "")
-            if instruction and instruction not in question_text:
-                instruction = self._replace_greeting(instruction, state.greeting)
-                question_text = f"{instruction}\n\n{question_text}"
+        question_text, tts_text = self._build_question_text_with_hidden_flags(question, question_text, state)
         
         # ✅ FIX: Get actual question_id from JSON
         if domain != TestDomain.REGISTRATION or index != 0:
             actual_question_id = question.get("question_id", f"{domain.value}_{index}")
         
+        # ✅ NEW: Extract hidden flags from question (support both old and new formats)
+        hidden_display = question.get("hidden_display", False)
+        hidden_audio = question.get("hidden_audio", False)
+        
+        # For backward compatibility, check old format flags
+        if not hidden_display:
+            if question.get("words_announcement_hidden", False) or question.get("instruction_after_hidden", False):
+                hidden_display = True
+        
         metadata = {
             "domain": domain.value,
             "question_index": index,
             "total_questions": len(questions),
-            "question_id": actual_question_id,  # ✅ Use actual question_id from JSON
+            "question_id": actual_question_id,
             "points": question.get("points", 1),
             "category": question.get("question_category", ""),
-            "completed": False
+            "completed": False,
+            "hidden_display": hidden_display,
+            "hidden_audio": hidden_audio,
+            "tts_text": tts_text  # ✅ NEW: TTS text (may differ from display text)
         }
         
         # ✅ v2.1_CORRECTED: Special handling for Registration
@@ -2025,7 +2004,144 @@ Trả về JSON với format:
         
         logger.info(f"✅ Serial 7s correct count: {correct_count}/{len(answers)}")
         return correct_count
-    
+    def _build_question_text_with_hidden_flags(self, question: Dict, question_text: str, state: SessionState) -> Tuple[str, str]:
+        """
+        ✅ NEW: Build display text and TTS text separately based on hidden flags
+        Handles: registration, repetition (lang_repetition), bee question (lang_comprehension_listening), memory recall
+        
+        Args:
+        question: Question data from JSON
+        question_text: Base question text
+        state: Session state
+        
+        Returns:
+        Tuple of (display_text, tts_text)
+        """
+        display_parts = []
+        tts_parts = []
+        
+        # Helper to check if content should be hidden from display
+        def is_hidden_display(field_name: str, default: bool = False) -> bool:
+        if f"{field_name}_hidden" in question:
+            return question.get(f"{field_name}_hidden", default)
+        return question.get("hidden_display", default)
+        
+        # Helper to check if content should be hidden from audio (not read by TTS)
+        def is_hidden_audio(field_name: str, default: bool = False) -> bool:
+        if f"{field_name}_tts" in question:
+            return not question.get(f"{field_name}_tts", True)  # Inverted: tts=True means not hidden
+        return question.get("hidden_audio", default)
+        
+        # 1. Instruction - check instruction_hidden and instruction_tts flags
+        instruction = question.get("instruction", "")
+        if instruction:
+        instruction = self._replace_greeting(instruction, state.greeting)
+        # For lang_repetition: instruction_hidden=true, instruction_tts=false
+        if not is_hidden_display("instruction", False):
+            display_parts.append(instruction)
+        if not is_hidden_audio("instruction", False):
+            tts_parts.append(instruction)
+        
+        # 2. Main question text - check for memory recall words to hide
+        if question_text:
+        # ✅ FIX: Hide "Con mèo, Chiếc xe, Cây lúa" from display but keep in TTS
+        question_id = question.get("question_id", "").lower()
+        is_recall = "recall" in question_id or "rec_" in question_id
+        
+        if is_recall:
+            # Hide memory words from display
+            words_patterns = [
+                "Ba từ đó là: Con mèo, Chiếc xe, Cây lúa.",
+                "Ba từ đó là: Con mèo, Chiếc xe, Cây lúa",
+                "Con mèo, Chiếc xe, Cây lúa",
+                "Con mèo, Chiếc xe, Cây lúa."
+            ]
+            
+            display_text_clean = question_text
+            hidden_parts = []
+            
+            for pattern in words_patterns:
+                if pattern in display_text_clean:
+                    display_text_clean = display_text_clean.replace(pattern, "").strip()
+                    hidden_parts.append(pattern)
+            
+            # Also check line by line for any line containing these words
+            if not hidden_parts:
+                lines = display_text_clean.split('\n')
+                visible_lines = []
+                for line in lines:
+                    if any(word in line for word in ["Con mèo", "Chiếc xe", "Cây lúa"]):
+                        hidden_parts.append(line)
+                    else:
+                        visible_lines.append(line)
+                display_text_clean = '\n'.join(visible_lines).strip()
+            
+            if hidden_parts:
+                display_parts.append(display_text_clean)
+                tts_parts.append(question_text)  # TTS reads full text including words
+            else:
+                display_parts.append(question_text)
+                tts_parts.append(question_text)
+        else:
+            display_parts.append(question_text)
+            tts_parts.append(question_text)
+        
+        # 3. Words announcement (for registration) - hidden from display but in TTS
+        words_announcement = question.get("words_announcement", "")
+        if words_announcement:
+        words_announcement = words_announcement.replace("**", "")
+        words_announcement = self._replace_greeting(words_announcement, state.greeting)
+        # Default: hidden from display (True) but in TTS (False = not hidden from audio)
+        if not is_hidden_display("words_announcement", True):
+            display_parts.append(words_announcement)
+        if not is_hidden_audio("words_announcement", False):
+            tts_parts.append(words_announcement)
+        
+        # 4. Sentence to repeat (for lang_repetition) - sentence_to_repeat_hidden=false, sentence_to_repeat_tts=true
+        sentence_to_repeat = question.get("sentence_to_repeat", "")
+        if sentence_to_repeat:
+        sentence_to_repeat = self._replace_greeting(sentence_to_repeat, state.greeting)
+        # Check flags: sentence_to_repeat_hidden, sentence_to_repeat_tts
+        if not is_hidden_display("sentence_to_repeat", False):
+            display_parts.append(sentence_to_repeat)
+        if not is_hidden_audio("sentence_to_repeat", False):  # Default: read in TTS
+            tts_parts.append(sentence_to_repeat)
+        
+        # 5. Sentence to listen (for lang_comprehension_listening) - sentence_to_listen_hidden=true, sentence_to_listen_tts=true
+        sentence_to_listen = question.get("sentence_to_listen", "")
+        if sentence_to_listen:
+        sentence_to_listen = self._replace_greeting(sentence_to_listen, state.greeting)
+        # Check flags: sentence_to_listen_hidden, sentence_to_listen_tts
+        # Default: hidden from display (True) but in TTS (False = not hidden from audio)
+        if not is_hidden_display("sentence_to_listen", True):
+            display_parts.append(sentence_to_listen)
+        if not is_hidden_audio("sentence_to_listen", False):  # Default: read in TTS
+            tts_parts.append(sentence_to_listen)
+        
+        # 6. Instruction after (for registration) - completely hidden
+        instruction_after = question.get("instruction_after", "")
+        if instruction_after:
+        instruction_after = self._replace_greeting(instruction_after, state.greeting)
+        # Default: hidden from display (True) and hidden from audio (True)
+        if not is_hidden_display("instruction_after", True):
+            display_parts.append(instruction_after)
+        if not is_hidden_audio("instruction_after", True):
+            tts_parts.append(instruction_after)
+        
+        # Build final texts
+        display_text = "\n\n".join(part for part in display_parts if part)
+        
+        # Check if metadata has tts_text (highest priority)
+        metadata = question.get("metadata", {})
+        if isinstance(metadata, dict) and metadata.get("tts_text"):
+        tts_text = self._replace_greeting(metadata.get("tts_text"), state.greeting)
+        elif tts_parts:
+        tts_text = "\n\n".join(part for part in tts_parts if part)
+        else:
+        tts_text = display_text  # Fallback
+        
+        return display_text, tts_text
+
     def _replace_greeting(self, text: str, greeting: str) -> str:
         """
         ✅ v2.1_CORRECTED: Replace pronoun placeholders
