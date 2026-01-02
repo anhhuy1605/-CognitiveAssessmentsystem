@@ -317,7 +317,7 @@ def submit_answer():
             # Check if session exists, create if not
             state = chatbot_service.get_session(session_id)
             if not state:
-                logger.info(f"⚠️ Session {session_id} not found, creating new session")
+                logger.warning(f"⚠️ Session {session_id} not found during submit_answer, creating new session (this may reset progress!)")
                 # Try to get user_info from request if available
                 user_info = {}
                 try:
@@ -328,24 +328,36 @@ def submit_answer():
                 except:
                     pass
                 
-                # Create session
+                # Create session - WARNING: This will reset all progress!
                 state = chatbot_service.create_session(session_id, user_info)
-                logger.info(f"✅ Auto-created session: {session_id}")
+                logger.warning(f"⚠️ Auto-created NEW session: {session_id} (previous progress may be lost)")
+            else:
+                # Log current state for debugging
+                logger.debug(f"📊 Session {session_id} state: domain={state.current_domain.value}, index={state.current_question_index}, total_score={state.total_score}")
             
             # Submit to service
-            message, metadata = chatbot_service.submit_answer(
-                session_id=session_id,
-                answer=answer,
-                audio_file=audio_path,
-                confidence=0.9
-            )
+            try:
+                message, metadata = chatbot_service.submit_answer(
+                    session_id=session_id,
+                    answer=answer,
+                    audio_file=audio_path,
+                    confidence=0.9
+                )
+                # ✅ FIX: Ensure metadata is always a dict
+                if not isinstance(metadata, dict):
+                    metadata = {}
+            except Exception as submit_error:
+                logger.error(f"❌ Error in submit_answer: {submit_error}", exc_info=True)
+                # Return graceful error response
+                message = "Xin lỗi, có lỗi xảy ra khi xử lý câu trả lời. Vui lòng thử lại."
+                metadata = {}
             
             # ✅ REAL-TIME: Return comprehensive response with score updates
             response_data = {
                 'success': True,
                 'status': 'success',
                 'message': message,
-                'metadata': metadata,
+                'metadata': metadata or {},  # ✅ FIX: Ensure metadata is always a dict
                 'transcript': answer
             }
             
@@ -358,10 +370,19 @@ def submit_answer():
                 response_data['progress'] = metadata['progress']
             
             # Add test completion status
-            if metadata.get('test_complete'):
+            if metadata.get('test_complete') or metadata.get('completed'):
                 response_data['test_complete'] = True
                 if metadata.get('final_score'):
                     response_data['final_score'] = metadata['final_score']
+                elif metadata.get('total_score') is not None:
+                    # Fallback: construct final_score from total_score
+                    response_data['final_score'] = {
+                        'total': metadata.get('total_score', 0),
+                        'max': 35,  # v2.1: 35 points total
+                        'percentage': round((metadata.get('total_score', 0) / 35) * 100, 1)
+                    }
+                if metadata.get('comprehensive_results'):
+                    response_data['comprehensive_results'] = metadata['comprehensive_results']
             
             return jsonify(response_data)
         else:
@@ -441,6 +462,23 @@ def save_results():
                     if state.total_score is not None:
                         mmse_score = int(state.total_score)
                         full_data['totalScore'] = mmse_score
+                    if state.completed_at:
+                        try:
+                            from services.comprehensive_results_generator import generate_comprehensive_results
+                            shap_explanations = None
+                            if state.mci_result:
+                                shap_explanations = {
+                                    'feature_contributions': {},
+                                    'grouped_contributions': state.mci_result.get('risk_components', {})
+                                }
+                            comprehensive_results = generate_comprehensive_results(
+                                session_state=state,
+                                shap_explanations=shap_explanations
+                            )
+                            full_data['comprehensive_results'] = comprehensive_results
+                            logger.info("✅ Comprehensive results included in save_results")
+                        except Exception as e:
+                            logger.warning(f"⚠️ Failed to generate comprehensive results in save_results: {e}")
                     elif 'totalScore' in data:
                         mmse_score = int(data.get('totalScore', 0))
                     
@@ -498,26 +536,75 @@ def save_results():
 
 @mmse_chatbot_bp.route('/results/<session_id>', methods=['GET'])
 def get_results(session_id: str):
-    """Get results for a specific session"""
+    """Get comprehensive results for a specific session"""
     try:
-        results_dir = os.path.join(os.path.dirname(__file__), '..', 'results', 'chatbot')
-        result_file = os.path.join(results_dir, f"{session_id}.json")
+        init_services()
         
-        if os.path.exists(result_file):
-            with open(result_file, 'r', encoding='utf-8') as f:
-                data = json.load(f)
+        if not chatbot_service:
             return jsonify({
-                'success': True,
-                'data': data
-            })
-        else:
+                'success': False,
+                'error': 'Chatbot service not initialized'
+            }), 500
+        
+        # Get session state
+        state = chatbot_service.get_session(session_id)
+        if not state:
             return jsonify({
                 'success': False,
                 'error': 'Session not found'
             }), 404
+        
+        # Check if test is completed
+        if not state.completed_at:
+            return jsonify({
+                'success': False,
+                'error': 'Test not completed yet',
+                'in_progress': True
+            }), 400
+        
+        # ✅ COMPREHENSIVE RESULTS: Generate full results
+        try:
+            from services.comprehensive_results_generator import generate_comprehensive_results
+            
+            # Generate SHAP explanations
+            shap_explanations = None
+            if state.mci_result:
+                shap_explanations = {
+                    'feature_contributions': {},
+                    'grouped_contributions': state.mci_result.get('risk_components', {})
+                }
+            
+            comprehensive_results = generate_comprehensive_results(
+                session_state=state,
+                shap_explanations=shap_explanations
+            )
+            
+            return jsonify({
+                'success': True,
+                'data': comprehensive_results,
+                'session_id': session_id,
+                'completed_at': state.completed_at
+            })
+            
+        except Exception as e:
+            logger.error(f"Error generating comprehensive results: {e}", exc_info=True)
+            # Fallback to basic results
+            return jsonify({
+                'success': True,
+                'data': {
+                    'assessment_result': {
+                        'mmse_score': state.total_score or 0,
+                        'classification': getattr(state, 'classification', 'Unknown'),
+                        'risk_level': state.mci_result.get('risk_level', 'on') if state.mci_result else 'on'
+                    },
+                    'error': 'Comprehensive results generation failed',
+                    'fallback': True
+                },
+                'session_id': session_id
+            })
             
     except Exception as e:
-        logger.error(f"Error getting results: {e}")
+        logger.error(f"Error getting results: {e}", exc_info=True)
         return jsonify({
             'success': False,
             'error': str(e)
