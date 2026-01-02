@@ -2035,7 +2035,7 @@ Trả về JSON với format:
         # 1. Instruction - check instruction_hidden and instruction_tts flags
         instruction = question.get("instruction", "")
         if instruction:
-        instruction = self._replace_greeting(instruction, state.greeting)
+            instruction = self._replace_greeting(instruction, state.greeting)
         # For lang_repetition: instruction_hidden=true, instruction_tts=false
         if not is_hidden_display("instruction", False):
             display_parts.append(instruction)
@@ -2044,7 +2044,7 @@ Trả về JSON với format:
         
         # 2. Main question text - check for memory recall words to hide
         if question_text:
-        # ✅ FIX: Hide "Con mèo, Chiếc xe, Cây lúa" from display but keep in TTS
+            # ✅ FIX: Hide "Con mèo, Chiếc xe, Cây lúa" from display but keep in TTS
         question_id = question.get("question_id", "").lower()
         is_recall = "recall" in question_id or "rec_" in question_id
         
@@ -2089,7 +2089,7 @@ Trả về JSON với format:
         # 3. Words announcement (for registration) - hidden from display but in TTS
         words_announcement = question.get("words_announcement", "")
         if words_announcement:
-        words_announcement = words_announcement.replace("**", "")
+            words_announcement = words_announcement.replace("**", "")
         words_announcement = self._replace_greeting(words_announcement, state.greeting)
         # Default: hidden from display (True) but in TTS (False = not hidden from audio)
         if not is_hidden_display("words_announcement", True):
@@ -2100,7 +2100,7 @@ Trả về JSON với format:
         # 4. Sentence to repeat (for lang_repetition) - sentence_to_repeat_hidden=false, sentence_to_repeat_tts=true
         sentence_to_repeat = question.get("sentence_to_repeat", "")
         if sentence_to_repeat:
-        sentence_to_repeat = self._replace_greeting(sentence_to_repeat, state.greeting)
+            sentence_to_replace = self._replace_greeting(sentence_to_repeat, state.greeting)
         # Check flags: sentence_to_repeat_hidden, sentence_to_repeat_tts
         if not is_hidden_display("sentence_to_repeat", False):
             display_parts.append(sentence_to_repeat)
@@ -2110,7 +2110,7 @@ Trả về JSON với format:
         # 5. Sentence to listen (for lang_comprehension_listening) - sentence_to_listen_hidden=true, sentence_to_listen_tts=true
         sentence_to_listen = question.get("sentence_to_listen", "")
         if sentence_to_listen:
-        sentence_to_listen = self._replace_greeting(sentence_to_listen, state.greeting)
+            sentence_to_listen = self._replace_greeting(sentence_to_listen, state.greeting)
         # Check flags: sentence_to_listen_hidden, sentence_to_listen_tts
         # Default: hidden from display (True) but in TTS (False = not hidden from audio)
         if not is_hidden_display("sentence_to_listen", True):
@@ -2121,7 +2121,7 @@ Trả về JSON với format:
         # 6. Instruction after (for registration) - completely hidden
         instruction_after = question.get("instruction_after", "")
         if instruction_after:
-        instruction_after = self._replace_greeting(instruction_after, state.greeting)
+            instruction_after = self._replace_greeting(instruction_after, state.greeting)
         # Default: hidden from display (True) and hidden from audio (True)
         if not is_hidden_display("instruction_after", True):
             display_parts.append(instruction_after)
@@ -2134,11 +2134,11 @@ Trả về JSON với format:
         # Check if metadata has tts_text (highest priority)
         metadata = question.get("metadata", {})
         if isinstance(metadata, dict) and metadata.get("tts_text"):
-        tts_text = self._replace_greeting(metadata.get("tts_text"), state.greeting)
+            tts_text = self._replace_greeting(metadata.get("tts_text"), state.greeting)
         elif tts_parts:
-        tts_text = "\n\n".join(part for part in tts_parts if part)
+            tts_text = "\n\n".join(part for part in tts_parts if part)
         else:
-        tts_text = display_text  # Fallback
+            tts_text = display_text  # Fallback
         
         return display_text, tts_text
 
