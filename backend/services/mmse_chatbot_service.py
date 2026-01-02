@@ -19,6 +19,7 @@ from typing import Dict, List, Optional, Any, Tuple
 from pathlib import Path
 import difflib
 import numpy as np
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +109,7 @@ class SessionState:
     serial_7s_current_value: int = 100  # Start from 100
     
     # ✅ v2.1: Executive Function - Verbal Fluency tracking
+    verbal_fluency_started: bool = False
     verbal_fluency_start_time: Optional[float] = None
     verbal_fluency_animals: List[str] = field(default_factory=list)
     verbal_fluency_completed: bool = False
@@ -221,6 +223,10 @@ class MMSEChatbotService:
             logger.info("✅ MCI Screening Service integrated")
         except ImportError as e:
             logger.warning(f"⚠️ MCI Service not available: {e}")
+        
+        # ✅ OPTIMIZATION: Thread pool for parallel feature extraction
+        self.executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="feature_extraction")
+        logger.info("✅ Thread pool initialized for parallel feature extraction")
         
         logger.info("✅ MMSEChatbotService initialized with FULL multimodal support")
     
@@ -363,6 +369,9 @@ class MMSEChatbotService:
         if not state:
             return "Lỗi: Không tìm thấy phiên làm việc", {}
         
+        # ✅ FIX: Initialize metadata at the start to avoid "cannot access local variable" error
+        metadata = {}
+
         domain = state.current_domain
         index = state.current_question_index
         
@@ -385,15 +394,36 @@ class MMSEChatbotService:
         
         # ✅ v2.1_CORRECTED: Handle instruction fields (instruction_part1, instruction_part2)
         # For registration domain, combine instruction_part1 and instruction_part2
+        actual_question_id = question.get("question_id", f"{domain.value}_{index}")
         if domain == TestDomain.REGISTRATION and index == 0:
-            instruction_part1 = question.get("instruction_part1", "")
-            instruction_part2 = question.get("instruction_part2", "")
-            if instruction_part1:
-                instruction_part1 = self._replace_greeting(instruction_part1, state.greeting)
-                question_text = f"{instruction_part1}\n\n{question_text}"
-            if instruction_part2:
-                instruction_part2 = self._replace_greeting(instruction_part2, state.greeting)
-                question_text = f"{question_text}\n\n{instruction_part2}"
+            message_parts = []
+            
+            # 1. Instruction
+            instruction = question.get("instruction", "")
+            if instruction:
+                instruction = self._replace_greeting(instruction, state.greeting)
+                message_parts.append(instruction)
+            
+            # 2. Question (main question text)
+            if question_text:
+                message_parts.append(question_text)
+            
+            # 3. Words announcement (for registration)
+            words_announcement = question.get("words_announcement", "")
+            if words_announcement:
+                # Remove markdown bold if present (safety check)
+                words_announcement = words_announcement.replace("**", "")
+                words_announcement = self._replace_greeting(words_announcement, state.greeting)
+                message_parts.append(words_announcement)
+            
+            # 4. Instruction after (for registration)
+            instruction_after = question.get("instruction_after", "")
+            if instruction_after:
+                instruction_after = self._replace_greeting(instruction_after, state.greeting)
+                message_parts.append(instruction_after)
+            
+            # Join with double newline for clear separation
+            question_text = "\n\n".join(part for part in message_parts if part)
         elif index == 0:
             # For other domains, use single instruction field
             instruction = question.get("instruction", "")
@@ -402,7 +432,8 @@ class MMSEChatbotService:
                 question_text = f"{instruction}\n\n{question_text}"
         
         # ✅ FIX: Get actual question_id from JSON
-        actual_question_id = question.get("question_id", f"{domain.value}_{index}")
+        if domain != TestDomain.REGISTRATION or index != 0:
+            actual_question_id = question.get("question_id", f"{domain.value}_{index}")
         
         metadata = {
             "domain": domain.value,
@@ -453,6 +484,9 @@ class MMSEChatbotService:
         if not state:
             return "Lỗi: Không tìm thấy phiên làm việc", {}
         
+        # ✅ FIX: Initialize metadata at the start to avoid "cannot access local variable" error
+        metadata = {}
+
         domain = state.current_domain
         index = state.current_question_index
         
@@ -518,20 +552,39 @@ class MMSEChatbotService:
                 traceback.print_exc()
                 score_result = {'points_earned': 0, 'points_possible': 0, 'is_correct': False, 'feedback': ''}
         
-        # Extract acoustic features if audio file provided (for risk assessment, not scoring)
-        if audio_file and self.acoustic_analyzer:
+        # ✅ OPTIMIZATION: Extract acoustic & linguistic features in parallel (if audio provided)
+        if audio_file:
             try:
-                logger.info(f"🔊 Extracting acoustic features for {audio_file}")
-                acoustic_features = self.acoustic_analyzer.extract_all_features(
-                    audio_file, 
-                    transcript=answer
+                logger.info(f"🚀 Starting PARALLEL feature extraction for {audio_file}")
+                acoustic_features, linguistic_features_dict = self._extract_features_parallel(
+                    audio_path=audio_file,
+                    transcript=answer,
+                    timeout=60
                 )
-                state.acoustic_features[f"{domain.value}_{index}"] = acoustic_features
-                logger.info(f"✅ Extracted {len(acoustic_features)} acoustic features")
+                
+                # Store acoustic features
+                if acoustic_features:
+                    state.acoustic_features[f"{domain.value}_{index}"] = acoustic_features
+                    logger.info(f"✅ Stored {len(acoustic_features)} acoustic features")
+                
             except Exception as e:
-                logger.warning(f"⚠️ Failed to extract acoustic features: {e}")
-        
-        state.responses[domain.value].append(response)
+                logger.error(f"⚠️ Parallel feature extraction failed: {e}", exc_info=True)
+                # Continue without features - not critical for scoring
+                # Pipeline should continue even if feature extraction fails
+
+                
+
+                # FIX: Dont append to responses if domain is COMPLETED
+
+                if domain != TestDomain.COMPLETED:
+
+                    # Ensure domain exists in responses dict
+
+                    if domain.value not in state.responses:
+
+                        state.responses[domain.value] = []
+
+                    state.responses[domain.value].append(response)
         
         # ✅ v2.1: Special handling for Serial 7s (auto-stop after 5 answers)
         if domain == TestDomain.ATTENTION_CALCULATION and actual_question_id == "attn_serial_sub":
@@ -552,20 +605,64 @@ class MMSEChatbotService:
                     # Check if we have 5 answers (auto-stop)
                     if len(state.serial_7s_answers) >= 5:
                         state.serial_7s_stopped = True
-                        logger.info(f"✅ Serial 7s completed: {state.serial_7s_answers}")
-                        # Move to next domain after this
+                        logger.info(f"✅ Serial 7s COMPLETED: {state.serial_7s_answers}")
+                        
+                        # ✅ Calculate correct count
+                        correct_count = self._count_correct_serial7s_answers(state.serial_7s_answers)
+                        logger.info(f"✅ Serial 7s Score: {correct_count}/5 correct")
+                        
+                        # ✅ Get appropriate completion message based on score
+                        pronoun = self.get_pronoun(session_id, True)
+                        pronoun_lower = self.get_pronoun(session_id, False)
+                        
+                        if correct_count == 5:
+                            completion_message = f"Xuất sắc! {pronoun} tính đúng cả 5 số!"
+                        elif correct_count >= 4:
+                            completion_message = f"Rất tốt! {pronoun} tính đúng {correct_count}/5 số."
+                        elif correct_count >= 3:
+                            completion_message = f"Được rồi! {pronoun} tính đúng {correct_count} số."
+                        elif correct_count >= 2:
+                            completion_message = f"Không sao {pronoun_lower}, phép tính này hơi khó."
+                        else:
+                            completion_message = f"Không sao {pronoun_lower}, chúng ta tiếp tục phần tiếp theo nhé."
+                        
+                        # ✅ Move to next question
                         state.current_question_index += 1
-                        return self._advance_to_next_domain(session_id)
+                        logger.info(f"➡️ Moving to next question: index {state.current_question_index}")
+                        
+                        # ✅ Return completion metadata so frontend knows to stop
+                        metadata['serial_7s_stopped'] = True
+                        metadata['serial_7s_completed'] = True
+                        metadata['serial_7s_answers'] = state.serial_7s_answers
+                        metadata['serial_7s_correct_count'] = correct_count
+                        metadata['serial_7s_score'] = correct_count
+                        metadata['move_to_next_question'] = True
+                        metadata['auto_stopped'] = True
+                        
+                        # ✅ Return completion message, then advance to next question
+                        next_question_text, next_metadata = self._advance_to_next_domain(session_id)
+                        # Merge metadata
+                        next_metadata.update(metadata)
+                        return completion_message, next_metadata
                     else:
                         # Continue asking for next number
-                        next_expected = state.serial_7s_current_value
+                        state.serial_7s_current_value = user_value  # Update current value to user's answer
+                        next_value_to_subtract = state.serial_7s_current_value - 7
                         pronoun = self.get_pronoun(session_id, False)
+                        
+                        remaining = 5 - len(state.serial_7s_answers)
                         next_question = f"Tiếp tục nhé {pronoun}! Lấy {user_value} trừ 7 bằng bao nhiêu?"
+                        
+                        logger.info(f"➡️ Serial 7s: Asking for next ({remaining} remaining)")
+                        
                         metadata['serial_7s'] = {
                             'answers_so_far': state.serial_7s_answers,
-                            'next_expected': next_expected,
-                            'remaining': 5 - len(state.serial_7s_answers)
+                            'current_value': user_value,
+                            'next_expected': next_value_to_subtract,
+                            'remaining': remaining,
+                            'stopped': False
                         }
+                        
                         return next_question, metadata
                 except ValueError:
                     pass
@@ -1058,6 +1155,32 @@ class MMSEChatbotService:
                 "education_group": adjusted_score_result.education_group if adjusted_score_result else None
             } if adjusted_score_result else None
         }
+        try:
+            from services.comprehensive_results_generator import generate_comprehensive_results
+            
+            # Generate SHAP explanations if available
+            shap_explanations = None
+            if state.mci_result:
+                # Try to get SHAP from risk components
+                shap_explanations = {
+                    'feature_contributions': {},
+                    'grouped_contributions': state.mci_result.get('risk_components', {})
+                }
+            
+            # Generate comprehensive results
+            comprehensive_results = generate_comprehensive_results(
+                session_state=state,
+                shap_explanations=shap_explanations
+            )
+            
+            # Add to metadata
+            metadata['comprehensive_results'] = comprehensive_results
+            logger.info("✅ Comprehensive results generated with SHAP, citations, and thresholds")
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to generate comprehensive results: {e}")
+            import traceback
+            traceback.print_exc()
         
         return message, metadata
     
@@ -1164,6 +1287,126 @@ class MMSEChatbotService:
             
         except Exception as e:
             logger.error(f"❌ Failed to extract linguistic features: {e}")
+            return {}
+    
+    def _extract_features_parallel(
+        self,
+        audio_path: str,
+        transcript: str,
+        timeout: int = 60
+    ) -> Tuple[Dict[str, Any], Dict[str, float]]:
+        """
+        ✅ OPTIMIZATION: Extract acoustic & linguistic features in parallel
+        
+        Args:
+            audio_path: Path to audio file
+            transcript: Transcribed text
+            timeout: Maximum time to wait (seconds)
+        
+        Returns:
+            Tuple of (acoustic_features, linguistic_features_dict)
+        """
+        start_time = time.time()
+        logger.info("🚀 Starting PARALLEL feature extraction...")
+        
+        try:
+            # Submit both tasks simultaneously
+            acoustic_future = None
+            linguistic_future = None
+            
+            if self.acoustic_analyzer:
+                logger.info(f"  📤 Submitting acoustic analysis task...")
+                acoustic_future = self.executor.submit(
+                    self._extract_acoustic_safe,
+                    audio_path,
+                    transcript
+                )
+            else:
+                logger.warning("  ⚠️ Acoustic analyzer not available")
+            
+            if self.linguistic_analyzer and transcript:
+                logger.info(f"  📤 Submitting linguistic analysis task...")
+                linguistic_future = self.executor.submit(
+                    self._extract_linguistic_safe,
+                    transcript
+                )
+            else:
+                if not self.linguistic_analyzer:
+                    logger.warning("  ⚠️ Linguistic analyzer not available")
+                if not transcript:
+                    logger.warning("  ⚠️ No transcript provided for linguistic analysis")
+            
+            # Wait for both to complete (with timeout)
+            acoustic_features = {}
+            linguistic_features = {}
+            
+            if acoustic_future:
+                logger.info(f"  ⏳ Waiting for acoustic analysis (timeout: {timeout}s)...")
+                acoustic_features = acoustic_future.result(timeout=timeout)
+                logger.info(f"  ✅ Acoustic analysis completed: {len(acoustic_features)} features")
+            
+            if linguistic_future:
+                logger.info(f"  ⏳ Waiting for linguistic analysis (timeout: {timeout}s)...")
+                linguistic_features = linguistic_future.result(timeout=timeout)
+                logger.info(f"  ✅ Linguistic analysis completed: {len(linguistic_features)} features")
+            
+            elapsed = time.time() - start_time
+            logger.info(f"✅ PARALLEL feature extraction completed in {elapsed:.2f}s")
+            logger.info(f"   - Acoustic: {len(acoustic_features)} features")
+            logger.info(f"   - Linguistic: {len(linguistic_features)} features")
+            
+            return acoustic_features, linguistic_features
+            
+        except FuturesTimeoutError:
+            elapsed = time.time() - start_time
+            logger.error(f"❌ Feature extraction timeout after {elapsed:.0f}s")
+            # Return empty features instead of crashing
+            return {}, {}
+        
+        except Exception as e:
+            elapsed = time.time() - start_time
+            logger.error(f"❌ Feature extraction failed after {elapsed:.2f}s: {e}", exc_info=True)
+            # Return empty features instead of crashing
+            return {}, {}
+    
+    def _extract_acoustic_safe(self, audio_path: str, transcript: str = "") -> Dict[str, Any]:
+        """
+        Safe wrapper for acoustic analysis with error handling
+        """
+        try:
+            start = time.time()
+            logger.info(f"  🔊 Starting acoustic analysis: {audio_path}")
+            features = self.acoustic_analyzer.extract_all_features(
+                audio_path,
+                transcript=transcript
+            )
+            elapsed = time.time() - start
+            logger.info(f"  ✅ Acoustic analysis: {elapsed:.2f}s, {len(features)} features")
+            return features
+            
+        except Exception as e:
+            logger.error(f"  ❌ Acoustic analysis failed: {e}", exc_info=True)
+            # Return empty features instead of crashing
+            return {}
+    
+    def _extract_linguistic_safe(self, transcript: str) -> Dict[str, float]:
+        """
+        Safe wrapper for linguistic analysis with error handling
+        """
+        try:
+            start = time.time()
+            logger.info(f"  📝 Starting linguistic analysis: {len(transcript)} chars")
+            features = self.linguistic_analyzer.extract_all_features(
+                transcript,
+                task_type='mmse_assessment'
+            )
+            elapsed = time.time() - start
+            logger.info(f"  ✅ Linguistic analysis: {elapsed:.2f}s, {len(features)} features")
+            return features
+            
+        except Exception as e:
+            logger.error(f"  ❌ Linguistic analysis failed: {e}", exc_info=True)
+            # Return empty features instead of crashing
             return {}
     
     def _evaluate_domain_with_gpt4o(self, state: SessionState, domain: str, max_score: int) -> int:
@@ -1730,6 +1973,58 @@ Trả về JSON với format:
                 return processed_questions
         
         return []
+    
+    def _extract_animals_from_text(self, text: str) -> List[str]:
+        """
+        Extract potential animal names from Vietnamese text
+        
+        Simple extraction - split text and filter out common stop words
+        In production, use NLP or named entity recognition for better accuracy
+        
+        Args:
+            text: Input text containing animal names
+            
+        Returns:
+            List of potential animal names (words)
+        """
+        if not text or not text.strip():
+            return []
+        
+        # Split by common separators
+        words = re.split(r'[,\s]+', text.lower().strip())
+        
+        # Filter out empty strings and very short words
+        words = [w.strip() for w in words if w.strip() and len(w.strip()) > 1]
+        
+        # Filter out common stop words and classifiers
+        stop_words = {'con', 'cái', 'chiếc', 'cây', 'bài', 'của', 'và', 'hoặc', 'là', 'có', 'được', 'sẽ', 'đã', 'đang', 'rồi', 'nhé', 'ạ', 'ơi', 'nào', 'đó', 'này', 'khi', 'nếu', 'với', 'theo', 'từ', 'về', 'trong', 'ngoài', 'trên', 'dưới', 'sau', 'trước', 'giữa', 'bên'}
+        animals = [w for w in words if w not in stop_words]
+        
+        return animals
+    
+    def _count_correct_serial7s_answers(self, answers: List[int]) -> int:
+        """
+        Count how many Serial 7s answers are objectively correct.
+        Expected sequence: [93, 86, 79, 72, 65]
+        
+        Args:
+            answers: List of user answers (integers)
+            
+        Returns:
+            Number of correct answers
+        """
+        expected = [93, 86, 79, 72, 65]
+        correct_count = 0
+        
+        for i, answer in enumerate(answers):
+            if i < len(expected) and answer == expected[i]:
+                correct_count += 1
+                logger.debug(f"✓ Serial 7s Answer {i+1}: {answer} is correct (expected {expected[i]})")
+            elif i < len(expected):
+                logger.debug(f"✗ Serial 7s Answer {i+1}: {answer} is incorrect (expected {expected[i]})")
+        
+        logger.info(f"✅ Serial 7s correct count: {correct_count}/{len(answers)}")
+        return correct_count
     
     def _replace_greeting(self, text: str, greeting: str) -> str:
         """
