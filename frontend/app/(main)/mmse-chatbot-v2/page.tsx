@@ -2002,6 +2002,18 @@ export default function MMSEChatbotPage() {
           </motion.div>
         )}
       </AnimatePresence>
+      
+      {/* ✅ CLOCK DRAWING: Modal popup */}
+      {showClockDrawing && (
+        <ClockDrawingCanvas 
+          onSubmit={async (imageData) => {
+            setShowClockDrawing(false);
+            // Gửi lên backend
+            await handleUserInput("Đã vẽ xong đồng hồ", undefined);
+          }}
+          onClose={() => setShowClockDrawing(false)}
+        />
+      )}
     </div>
   );
 }
