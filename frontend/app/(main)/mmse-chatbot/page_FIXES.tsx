@@ -1,9 +1,33 @@
 // FIXES for mmse-chatbot/page.tsx
 // =================================
 // Ensure TTS reads hidden content but UI doesn't show it
+// 
+// NOTE: This is a reference/documentation file showing code patterns.
+// These functions are examples and should be integrated into the main page.tsx file.
+
+// Type definitions for reference
+interface Message {
+    id: string;
+    type: "bot" | "user" | "system";
+    content: string;
+    timestamp: Date;
+    hiddenContent?: string[];
+    isRevealed?: boolean;
+    domain?: string;
+    questionId?: string;
+    questionCategory?: string;
+    displayMode?: string;
+    ttsText?: string;
+}
 
 // ✅ FIX 1: In handleUserInput or addBotMessage, ensure TTS uses full text
-const speakText = (text: string, hiddenContent?: string[]) => {
+// Example function signature - integrate into your component with proper state
+export const speakTextExample = (
+    text: string, 
+    hiddenContent: string[] | undefined,
+    voiceEnabled: boolean,
+    isRevealed: boolean
+) => {
     if (!voiceEnabled) return;
     
     // ✅ FIX: Build full text for TTS (includes hidden content)
@@ -29,7 +53,15 @@ const speakText = (text: string, hiddenContent?: string[]) => {
 };
 
 // ✅ FIX 2: When adding bot message, use tts_text from metadata if available
-const addBotMessage = (session: any, message: string, metadata?: any) => {
+// Example function signature - integrate into your component with proper state setters
+export const addBotMessageExample = (
+    session: any, 
+    message: string, 
+    metadata: any,
+    setSession: (updater: (prev: any) => any) => void,
+    voiceEnabled: boolean,
+    speakText: (text: string, hiddenContent?: string[]) => void
+) => {
     const botMessage: Message = {
         id: `bot_${Date.now()}`,
         type: "bot",
@@ -44,7 +76,7 @@ const addBotMessage = (session: any, message: string, metadata?: any) => {
         ttsText: metadata?.tts_text || message  // ✅ FIX: Use tts_text for TTS (includes hidden content)
     };
     
-    setSession(prev => {
+    setSession((prev: any) => {
         if (!prev) return prev;
         return {
             ...prev,
@@ -59,7 +91,8 @@ const addBotMessage = (session: any, message: string, metadata?: any) => {
 };
 
 // ✅ FIX 3: Ensure ChatInterface is used and passes correct props
-// In the return statement, use ChatInterface component:
+// Example JSX - integrate into your component's return statement
+/*
 return (
     <div className="flex flex-col h-screen">
         <ChatInterface
@@ -79,6 +112,7 @@ return (
         />
     </div>
 );
+*/
 
 
 

@@ -1,13 +1,16 @@
 // INTEGRATION CODE for mmse-chatbot/page.tsx
 // ===========================================
 // Replace ChatInterface với ChatInterfaceWithTracker
+//
+// NOTE: This is a reference/documentation file showing integration steps.
+// Follow these steps to integrate ChatInterfaceWithTracker into your page.tsx file.
 
 // 1. Update import:
 // OLD:
 // import ChatInterface from '@/components/mmse-chatbot/ChatInterface';
 
 // NEW:
-import ChatInterfaceWithTracker from '@/components/mmse-chatbot/ChatInterfaceWithTracker';
+// import ChatInterfaceWithTracker from '@/components/mmse-chatbot/ChatInterfaceWithTracker';
 
 // 2. In return statement, replace:
 // OLD:
@@ -17,6 +20,7 @@ import ChatInterfaceWithTracker from '@/components/mmse-chatbot/ChatInterfaceWit
 // />
 
 // NEW:
+/*
 <ChatInterfaceWithTracker
   messages={session.messages}
   currentTranscript={currentTranscript}
@@ -30,9 +34,13 @@ import ChatInterfaceWithTracker from '@/components/mmse-chatbot/ChatInterfaceWit
   onToggleVoice={toggleVoice}
   elderlyFriendly={true}
 />
+*/
 
 // ✅ That's it! Tracker will automatically sync with messages
 // and render special interfaces only when questions are active
+
+// Export empty object to make this a valid module
+export {};
 
 
 
