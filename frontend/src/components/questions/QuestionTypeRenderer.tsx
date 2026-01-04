@@ -5,13 +5,14 @@
 
 "use client";
 
-import React from 'react';
+import React, { useState } from 'react';
 import Serial7sInterface from './Serial7sInterface';
 import WordRecallInterface from './WordRecallInterface';
 import ReverseSpellingInterface from './ReverseSpellingInterface';
 import NamingInterface from './NamingInterface';
 import AnimalNamingInterface from './AnimalNamingInterface';
 import ClockDrawingModal from './ClockDrawingModal';
+import { Button } from '@/components/ui/button';
 
 export interface QuestionTypeRendererProps {
   questionId: string;
@@ -164,12 +165,30 @@ export default function QuestionTypeRenderer({
     normalizedId.includes('visual_clock') ||
     normalizedCategory.includes('visuospatial')
   ) {
+    const [isModalOpen, setIsModalOpen] = useState(false);
+    
     return (
-      <ClockDrawingModal
-        questionId={questionId}
-        targetTime={displayMode}
-        onComplete={(result) => onComplete?.(result)}
-      />
+      <>
+        <Button
+          onClick={() => setIsModalOpen(true)}
+          size="lg"
+          className="w-full"
+        >
+          Mở bảng vẽ đồng hồ
+        </Button>
+        <ClockDrawingModal
+          isOpen={isModalOpen}
+          targetTime={displayMode || "11:10"}
+          onSubmit={(imageData) => {
+            // Submit clock drawing image to backend
+            onComplete?.({ imageData, questionId });
+            setIsModalOpen(false);
+          }}
+          onClose={() => setIsModalOpen(false)}
+          elderlyFriendly={true}
+          canvasSize={500}
+        />
+      </>
     );
   }
 

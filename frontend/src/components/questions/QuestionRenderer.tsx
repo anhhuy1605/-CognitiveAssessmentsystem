@@ -61,7 +61,7 @@ export default function QuestionRenderer({
       <QuestionTypeRenderer
         questionId={questionId}
         questionCategory={questionCategory}
-        displayMode={displayMode || metadata.displayMode}
+        displayMode={targetTime || displayMode || metadata.targetTime || metadata.displayMode}
         hiddenContent={hiddenContent || metadata.hiddenContent}
         currentTranscript={currentTranscript}
         isRecording={isRecording}
@@ -69,7 +69,6 @@ export default function QuestionRenderer({
         onStop={onStop}
         onTimeUp={onTimeUp}
         onComplete={onComplete}
-        targetTime={targetTime || metadata.targetTime}
       />
     </div>
   );
