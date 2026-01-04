@@ -1,0 +1,578 @@
+================================================================================
+MCI/AD PATIENT AUDIO ANALYSIS - SUMMARY REPORT
+================================================================================
+Generated: 2026-01-04 10:43:57
+
+OVERALL SUMMARY
+--------------------------------------------------------------------------------
+Patient 1 (Age: 80, Gender: M, Label: MCI): High Risk (6/7 indicators)
+Patient 2 (Age: 60, Gender: F, Label: AD): High Risk (6/7 indicators)
+Patient 3 (Age: 67, Gender: M, Label: Normal): High Risk (6/7 indicators)
+Patient 4 (Age: 64, Gender: M, Label: MCI): High Risk (6/7 indicators)
+Patient 5 (Age: 81, Gender: M, Label: AD): High Risk (6/7 indicators)
+Patient 6 (Age: 78, Gender: F, Label: Normal): High Risk (6/7 indicators)
+Patient 7 (Age: 61, Gender: M, Label: MCI): High Risk (6/7 indicators)
+Patient 8 (Age: 62, Gender: M, Label: AD): High Risk (6/7 indicators)
+Patient 9 (Age: 67, Gender: M, Label: Normal): High Risk (6/7 indicators)
+Patient 10 (Age: 77, Gender: M, Label: MCI): High Risk (6/7 indicators)
+Patient 11 (Age: 82, Gender: F, Label: AD): High Risk (6/7 indicators)
+Patient 12 (Age: 67, Gender: F, Label: Normal): High Risk (6/7 indicators)
+Patient 13 (Age: 78, Gender: F, Label: MCI): High Risk (5/7 indicators)
+Patient 14 (Age: 85, Gender: M, Label: AD): High Risk (5/7 indicators)
+Patient 15 (Age: 84, Gender: M, Label: Normal): High Risk (5/7 indicators)
+Patient 16 (Age: 82, Gender: F, Label: MCI): High Risk (5/7 indicators)
+Patient 17 (Age: 70, Gender: F, Label: AD): High Risk (5/7 indicators)
+Patient 18 (Age: 64, Gender: M, Label: Normal): High Risk (5/7 indicators)
+
+================================================================================
+PATIENT 1
+================================================================================
+Metadata:
+  Age: 80
+  Gender: M
+  Clinical Label: MCI
+
+BASIC METRICS:
+  Audio Duration: 500.35 s
+  Speaking Time Ratio: 99.5%
+  Total Pause Time: 2.66 s
+
+ACOUSTIC FEATURES:
+  F0 Mean: 195.2 Hz
+  F0 Std: 61.4 Hz
+  Speech Rate: 0.4 wpm
+  Jitter: 3.15%
+  Shimmer: 18.78%
+  Energy Mean: 70.0010
+
+MCI/AD INDICATORS DETECTED:
+  [X] Pitch Instability (Std > 30Hz)
+  [X] Slow Speech (<100 wpm)
+  [X] High Pause Frequency (>5/min)
+  [X] Abnormal Jitter (>1.0%)
+  [X] Abnormal Shimmer (>3.0%)
+  [X] High Spectral Variability
+
+  RISK LEVEL: HIGH (6 indicators)
+
+================================================================================
+PATIENT 2
+================================================================================
+Metadata:
+  Age: 60
+  Gender: F
+  Clinical Label: AD
+
+BASIC METRICS:
+  Audio Duration: 500.35 s
+  Speaking Time Ratio: 99.5%
+  Total Pause Time: 2.66 s
+
+ACOUSTIC FEATURES:
+  F0 Mean: 195.2 Hz
+  F0 Std: 61.4 Hz
+  Speech Rate: 0.4 wpm
+  Jitter: 3.15%
+  Shimmer: 18.78%
+  Energy Mean: 70.0010
+
+MCI/AD INDICATORS DETECTED:
+  [X] Pitch Instability (Std > 30Hz)
+  [X] Slow Speech (<100 wpm)
+  [X] High Pause Frequency (>5/min)
+  [X] Abnormal Jitter (>1.0%)
+  [X] Abnormal Shimmer (>3.0%)
+  [X] High Spectral Variability
+
+  RISK LEVEL: HIGH (6 indicators)
+
+================================================================================
+PATIENT 3
+================================================================================
+Metadata:
+  Age: 67
+  Gender: M
+  Clinical Label: Normal
+
+BASIC METRICS:
+  Audio Duration: 115.86 s
+  Speaking Time Ratio: 99.6%
+  Total Pause Time: 0.48 s
+
+ACOUSTIC FEATURES:
+  F0 Mean: 162.7 Hz
+  F0 Std: 60.7 Hz
+  Speech Rate: 0.3 wpm
+  Jitter: 2.75%
+  Shimmer: 16.13%
+  Energy Mean: 66.2644
+
+MCI/AD INDICATORS DETECTED:
+  [X] Pitch Instability (Std > 30Hz)
+  [X] Slow Speech (<100 wpm)
+  [X] High Pause Frequency (>5/min)
+  [X] Abnormal Jitter (>1.0%)
+  [X] Abnormal Shimmer (>3.0%)
+  [X] High Spectral Variability
+
+  RISK LEVEL: HIGH (6 indicators)
+
+================================================================================
+PATIENT 4
+================================================================================
+Metadata:
+  Age: 64
+  Gender: M
+  Clinical Label: MCI
+
+BASIC METRICS:
+  Audio Duration: 115.86 s
+  Speaking Time Ratio: 99.6%
+  Total Pause Time: 0.48 s
+
+ACOUSTIC FEATURES:
+  F0 Mean: 162.7 Hz
+  F0 Std: 60.7 Hz
+  Speech Rate: 0.3 wpm
+  Jitter: 2.75%
+  Shimmer: 16.13%
+  Energy Mean: 66.2644
+
+MCI/AD INDICATORS DETECTED:
+  [X] Pitch Instability (Std > 30Hz)
+  [X] Slow Speech (<100 wpm)
+  [X] High Pause Frequency (>5/min)
+  [X] Abnormal Jitter (>1.0%)
+  [X] Abnormal Shimmer (>3.0%)
+  [X] High Spectral Variability
+
+  RISK LEVEL: HIGH (6 indicators)
+
+================================================================================
+PATIENT 5
+================================================================================
+Metadata:
+  Age: 81
+  Gender: M
+  Clinical Label: AD
+
+BASIC METRICS:
+  Audio Duration: 257.81 s
+  Speaking Time Ratio: 99.9%
+  Total Pause Time: 0.38 s
+
+ACOUSTIC FEATURES:
+  F0 Mean: 157.6 Hz
+  F0 Std: 45.6 Hz
+  Speech Rate: 0.5 wpm
+  Jitter: 2.71%
+  Shimmer: 19.90%
+  Energy Mean: 69.9986
+
+MCI/AD INDICATORS DETECTED:
+  [X] Pitch Instability (Std > 30Hz)
+  [X] Slow Speech (<100 wpm)
+  [X] High Pause Frequency (>5/min)
+  [X] Abnormal Jitter (>1.0%)
+  [X] Abnormal Shimmer (>3.0%)
+  [X] High Spectral Variability
+
+  RISK LEVEL: HIGH (6 indicators)
+
+================================================================================
+PATIENT 6
+================================================================================
+Metadata:
+  Age: 78
+  Gender: F
+  Clinical Label: Normal
+
+BASIC METRICS:
+  Audio Duration: 257.81 s
+  Speaking Time Ratio: 99.9%
+  Total Pause Time: 0.38 s
+
+ACOUSTIC FEATURES:
+  F0 Mean: 157.6 Hz
+  F0 Std: 45.6 Hz
+  Speech Rate: 0.5 wpm
+  Jitter: 2.71%
+  Shimmer: 19.90%
+  Energy Mean: 69.9986
+
+MCI/AD INDICATORS DETECTED:
+  [X] Pitch Instability (Std > 30Hz)
+  [X] Slow Speech (<100 wpm)
+  [X] High Pause Frequency (>5/min)
+  [X] Abnormal Jitter (>1.0%)
+  [X] Abnormal Shimmer (>3.0%)
+  [X] High Spectral Variability
+
+  RISK LEVEL: HIGH (6 indicators)
+
+================================================================================
+PATIENT 7
+================================================================================
+Metadata:
+  Age: 61
+  Gender: M
+  Clinical Label: MCI
+
+BASIC METRICS:
+  Audio Duration: 260.42 s
+  Speaking Time Ratio: 99.9%
+  Total Pause Time: 0.22 s
+
+ACOUSTIC FEATURES:
+  F0 Mean: 198.0 Hz
+  F0 Std: 76.4 Hz
+  Speech Rate: 0.5 wpm
+  Jitter: 3.29%
+  Shimmer: 20.67%
+  Energy Mean: 68.3096
+
+MCI/AD INDICATORS DETECTED:
+  [X] Pitch Instability (Std > 30Hz)
+  [X] Slow Speech (<100 wpm)
+  [X] High Pause Frequency (>5/min)
+  [X] Abnormal Jitter (>1.0%)
+  [X] Abnormal Shimmer (>3.0%)
+  [X] High Spectral Variability
+
+  RISK LEVEL: HIGH (6 indicators)
+
+================================================================================
+PATIENT 8
+================================================================================
+Metadata:
+  Age: 62
+  Gender: M
+  Clinical Label: AD
+
+BASIC METRICS:
+  Audio Duration: 260.42 s
+  Speaking Time Ratio: 99.9%
+  Total Pause Time: 0.22 s
+
+ACOUSTIC FEATURES:
+  F0 Mean: 198.0 Hz
+  F0 Std: 76.4 Hz
+  Speech Rate: 0.5 wpm
+  Jitter: 3.29%
+  Shimmer: 20.67%
+  Energy Mean: 68.3096
+
+MCI/AD INDICATORS DETECTED:
+  [X] Pitch Instability (Std > 30Hz)
+  [X] Slow Speech (<100 wpm)
+  [X] High Pause Frequency (>5/min)
+  [X] Abnormal Jitter (>1.0%)
+  [X] Abnormal Shimmer (>3.0%)
+  [X] High Spectral Variability
+
+  RISK LEVEL: HIGH (6 indicators)
+
+================================================================================
+PATIENT 9
+================================================================================
+Metadata:
+  Age: 67
+  Gender: M
+  Clinical Label: Normal
+
+BASIC METRICS:
+  Audio Duration: 95.81 s
+  Speaking Time Ratio: 99.8%
+  Total Pause Time: 0.19 s
+
+ACOUSTIC FEATURES:
+  F0 Mean: 141.7 Hz
+  F0 Std: 74.1 Hz
+  Speech Rate: 0.4 wpm
+  Jitter: 4.30%
+  Shimmer: 20.22%
+  Energy Mean: 70.2335
+
+MCI/AD INDICATORS DETECTED:
+  [X] Pitch Instability (Std > 30Hz)
+  [X] Slow Speech (<100 wpm)
+  [X] High Pause Frequency (>5/min)
+  [X] Abnormal Jitter (>1.0%)
+  [X] Abnormal Shimmer (>3.0%)
+  [X] High Spectral Variability
+
+  RISK LEVEL: HIGH (6 indicators)
+
+================================================================================
+PATIENT 10
+================================================================================
+Metadata:
+  Age: 77
+  Gender: M
+  Clinical Label: MCI
+
+BASIC METRICS:
+  Audio Duration: 95.81 s
+  Speaking Time Ratio: 99.8%
+  Total Pause Time: 0.19 s
+
+ACOUSTIC FEATURES:
+  F0 Mean: 141.7 Hz
+  F0 Std: 74.1 Hz
+  Speech Rate: 0.4 wpm
+  Jitter: 4.30%
+  Shimmer: 20.22%
+  Energy Mean: 70.2335
+
+MCI/AD INDICATORS DETECTED:
+  [X] Pitch Instability (Std > 30Hz)
+  [X] Slow Speech (<100 wpm)
+  [X] High Pause Frequency (>5/min)
+  [X] Abnormal Jitter (>1.0%)
+  [X] Abnormal Shimmer (>3.0%)
+  [X] High Spectral Variability
+
+  RISK LEVEL: HIGH (6 indicators)
+
+================================================================================
+PATIENT 11
+================================================================================
+Metadata:
+  Age: 82
+  Gender: F
+  Clinical Label: AD
+
+BASIC METRICS:
+  Audio Duration: 196.42 s
+  Speaking Time Ratio: 99.8%
+  Total Pause Time: 0.45 s
+
+ACOUSTIC FEATURES:
+  F0 Mean: 178.4 Hz
+  F0 Std: 52.2 Hz
+  Speech Rate: 0.4 wpm
+  Jitter: 3.42%
+  Shimmer: 19.67%
+  Energy Mean: 67.3817
+
+MCI/AD INDICATORS DETECTED:
+  [X] Pitch Instability (Std > 30Hz)
+  [X] Slow Speech (<100 wpm)
+  [X] High Pause Frequency (>5/min)
+  [X] Abnormal Jitter (>1.0%)
+  [X] Abnormal Shimmer (>3.0%)
+  [X] High Spectral Variability
+
+  RISK LEVEL: HIGH (6 indicators)
+
+================================================================================
+PATIENT 12
+================================================================================
+Metadata:
+  Age: 67
+  Gender: F
+  Clinical Label: Normal
+
+BASIC METRICS:
+  Audio Duration: 196.42 s
+  Speaking Time Ratio: 99.8%
+  Total Pause Time: 0.45 s
+
+ACOUSTIC FEATURES:
+  F0 Mean: 178.4 Hz
+  F0 Std: 52.2 Hz
+  Speech Rate: 0.4 wpm
+  Jitter: 3.42%
+  Shimmer: 19.67%
+  Energy Mean: 67.3817
+
+MCI/AD INDICATORS DETECTED:
+  [X] Pitch Instability (Std > 30Hz)
+  [X] Slow Speech (<100 wpm)
+  [X] High Pause Frequency (>5/min)
+  [X] Abnormal Jitter (>1.0%)
+  [X] Abnormal Shimmer (>3.0%)
+  [X] High Spectral Variability
+
+  RISK LEVEL: HIGH (6 indicators)
+
+================================================================================
+PATIENT 13
+================================================================================
+Metadata:
+  Age: 78
+  Gender: F
+  Clinical Label: MCI
+
+BASIC METRICS:
+  Audio Duration: 317.65 s
+  Speaking Time Ratio: 100.0%
+  Total Pause Time: 0.13 s
+
+ACOUSTIC FEATURES:
+  F0 Mean: 205.8 Hz
+  F0 Std: 72.0 Hz
+  Speech Rate: 0.4 wpm
+  Jitter: 3.49%
+  Shimmer: 18.25%
+  Energy Mean: 72.3005
+
+MCI/AD INDICATORS DETECTED:
+  [X] Pitch Instability (Std > 30Hz)
+  [X] Slow Speech (<100 wpm)
+  [X] Abnormal Jitter (>1.0%)
+  [X] Abnormal Shimmer (>3.0%)
+  [X] High Spectral Variability
+
+  RISK LEVEL: HIGH (5 indicators)
+
+================================================================================
+PATIENT 14
+================================================================================
+Metadata:
+  Age: 85
+  Gender: M
+  Clinical Label: AD
+
+BASIC METRICS:
+  Audio Duration: 317.65 s
+  Speaking Time Ratio: 100.0%
+  Total Pause Time: 0.13 s
+
+ACOUSTIC FEATURES:
+  F0 Mean: 205.8 Hz
+  F0 Std: 72.0 Hz
+  Speech Rate: 0.4 wpm
+  Jitter: 3.49%
+  Shimmer: 18.25%
+  Energy Mean: 72.3005
+
+MCI/AD INDICATORS DETECTED:
+  [X] Pitch Instability (Std > 30Hz)
+  [X] Slow Speech (<100 wpm)
+  [X] Abnormal Jitter (>1.0%)
+  [X] Abnormal Shimmer (>3.0%)
+  [X] High Spectral Variability
+
+  RISK LEVEL: HIGH (5 indicators)
+
+================================================================================
+PATIENT 15
+================================================================================
+Metadata:
+  Age: 84
+  Gender: M
+  Clinical Label: Normal
+
+BASIC METRICS:
+  Audio Duration: 14.70 s
+  Speaking Time Ratio: 99.3%
+  Total Pause Time: 0.10 s
+
+ACOUSTIC FEATURES:
+  F0 Mean: 206.4 Hz
+  F0 Std: 59.3 Hz
+  Speech Rate: 2.7 wpm
+  Jitter: 3.95%
+  Shimmer: 20.38%
+  Energy Mean: 72.3009
+
+MCI/AD INDICATORS DETECTED:
+  [X] Pitch Instability (Std > 30Hz)
+  [X] Slow Speech (<100 wpm)
+  [X] Abnormal Jitter (>1.0%)
+  [X] Abnormal Shimmer (>3.0%)
+  [X] High Spectral Variability
+
+  RISK LEVEL: HIGH (5 indicators)
+
+================================================================================
+PATIENT 16
+================================================================================
+Metadata:
+  Age: 82
+  Gender: F
+  Clinical Label: MCI
+
+BASIC METRICS:
+  Audio Duration: 14.70 s
+  Speaking Time Ratio: 99.3%
+  Total Pause Time: 0.10 s
+
+ACOUSTIC FEATURES:
+  F0 Mean: 206.4 Hz
+  F0 Std: 59.3 Hz
+  Speech Rate: 2.7 wpm
+  Jitter: 3.95%
+  Shimmer: 20.38%
+  Energy Mean: 72.3009
+
+MCI/AD INDICATORS DETECTED:
+  [X] Pitch Instability (Std > 30Hz)
+  [X] Slow Speech (<100 wpm)
+  [X] Abnormal Jitter (>1.0%)
+  [X] Abnormal Shimmer (>3.0%)
+  [X] High Spectral Variability
+
+  RISK LEVEL: HIGH (5 indicators)
+
+================================================================================
+PATIENT 17
+================================================================================
+Metadata:
+  Age: 70
+  Gender: F
+  Clinical Label: AD
+
+BASIC METRICS:
+  Audio Duration: 182.95 s
+  Speaking Time Ratio: 100.0%
+  Total Pause Time: 0.06 s
+
+ACOUSTIC FEATURES:
+  F0 Mean: 167.6 Hz
+  F0 Std: 42.4 Hz
+  Speech Rate: 0.4 wpm
+  Jitter: 4.79%
+  Shimmer: 21.42%
+  Energy Mean: 65.8401
+
+MCI/AD INDICATORS DETECTED:
+  [X] Pitch Instability (Std > 30Hz)
+  [X] Slow Speech (<100 wpm)
+  [X] Abnormal Jitter (>1.0%)
+  [X] Abnormal Shimmer (>3.0%)
+  [X] High Spectral Variability
+
+  RISK LEVEL: HIGH (5 indicators)
+
+================================================================================
+PATIENT 18
+================================================================================
+Metadata:
+  Age: 64
+  Gender: M
+  Clinical Label: Normal
+
+BASIC METRICS:
+  Audio Duration: 182.95 s
+  Speaking Time Ratio: 100.0%
+  Total Pause Time: 0.06 s
+
+ACOUSTIC FEATURES:
+  F0 Mean: 167.6 Hz
+  F0 Std: 42.4 Hz
+  Speech Rate: 0.4 wpm
+  Jitter: 4.79%
+  Shimmer: 21.42%
+  Energy Mean: 65.8401
+
+MCI/AD INDICATORS DETECTED:
+  [X] Pitch Instability (Std > 30Hz)
+  [X] Slow Speech (<100 wpm)
+  [X] Abnormal Jitter (>1.0%)
+  [X] Abnormal Shimmer (>3.0%)
+  [X] High Spectral Variability
+
+  RISK LEVEL: HIGH (5 indicators)
+

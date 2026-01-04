@@ -135,8 +135,10 @@ export default function QuestionTypeRenderer({
     return (
       <NamingInterface
         questionId={questionId}
-        currentTranscript={currentTranscript}
-        onComplete={(objects) => onComplete?.({ objects })}
+        onAnswer={(answer) => {
+          onAnswer?.(answer);
+          onComplete?.({ objects: [answer] });
+        }}
       />
     );
   }
@@ -154,7 +156,10 @@ export default function QuestionTypeRenderer({
         currentTranscript={currentTranscript}
         isRecording={isRecording}
         onTimeUp={() => onTimeUp?.()}
-        onComplete={(animals) => onComplete?.({ animals })}
+        onAnswer={(animals) => {
+          onAnswer?.(animals);
+          onComplete?.({ animals });
+        }}
       />
     );
   }

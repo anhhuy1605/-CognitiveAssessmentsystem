@@ -99,7 +99,6 @@ export default function MessageList({
                         onSendMessage('', undefined, { imageData: result.imageData, questionId: message.questionId });
                       }
                     }}
-                    targetTime={message.displayMode}
                   />
                 </div>
               )}

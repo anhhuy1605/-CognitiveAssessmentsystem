@@ -66,7 +66,7 @@ class AcousticFeatureExtractor:
         
         f0_values = []
         for i in range(pitch.get_number_of_frames()):
-            f0 = call(pitch, "Get value in frame", i+1)
+            f0 = call(pitch, "Get value in frame", i+1, "Hertz")
             if f0 > 0:  # Valid F0
                 f0_values.append(f0)
         

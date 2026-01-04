@@ -45,8 +45,8 @@ export default function ReverseSpellingInterface({
       const parsedLetters: string[] = [];
       for (const letter of letters) {
         const parsed = parseVietnameseLetter(letter);
-        if (parsed) {
-          parsedLetters.push(parsed);
+        if (parsed && parsed.length > 0) {
+          parsedLetters.push(...parsed);
         }
       }
       

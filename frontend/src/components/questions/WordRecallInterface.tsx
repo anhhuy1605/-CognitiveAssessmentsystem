@@ -24,17 +24,17 @@ export default function WordRecallInterface({
 }: WordRecallInterfaceProps) {
   const [matchedWords, setMatchedWords] = useState<string[]>([]);
   const [showWords, setShowWords] = useState(phase === 'registration' || propShowWords === true);
-  const keywords = extractKeywords(words);
+  const keywords = extractKeywords(words.join(' '));
 
   // Process transcript for recall phase
   useEffect(() => {
     if (phase === 'recall' && currentTranscript) {
-      const matched = matchKeywords(currentTranscript, keywords);
-      setMatchedWords(matched);
+      const result = matchKeywords(currentTranscript, keywords.join(' '));
+      setMatchedWords(result.matched);
       
       // Check if all words matched
-      if (matched.length === words.length) {
-        onComplete(matched);
+      if (result.matched.length === words.length) {
+        onComplete(result.matched);
       }
     }
   }, [currentTranscript, phase, words, keywords, onComplete]);
@@ -54,9 +54,9 @@ export default function WordRecallInterface({
       return 'hidden'; // Show all words during registration
     }
     
-    const keyword = extractKeywords([word])[0];
-    const matched = matchKeywords(currentTranscript, [keyword]);
-    return matched.length > 0 ? 'matched' : 'unmatched';
+    const keyword = extractKeywords(word)[0] || word;
+    const result = matchKeywords(currentTranscript, keyword);
+    return result.matched.length > 0 ? 'matched' : 'unmatched';
   };
 
   return (
@@ -96,7 +96,7 @@ export default function WordRecallInterface({
             {/* Progress indicators */}
             <div className="flex justify-center gap-4 mt-6">
               {words.map((word, index) => {
-                const keyword = extractKeywords([word])[0];
+                const keyword = extractKeywords(word)[0] || word;
                 const isMatched = matchedWords.includes(keyword);
                 
                 return (
