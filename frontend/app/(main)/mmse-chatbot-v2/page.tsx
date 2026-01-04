@@ -1370,6 +1370,8 @@ export default function MMSEChatbotPage() {
     console.log("✅ File validation passed, starting FileReader...");
 
     // ✅ TRANSCRIBE ONLY: Convert File to Blob and transcribe
+    // Store file type before callback to avoid type narrowing issues
+    const fileType = file.type || 'audio/webm';
     const reader = new FileReader();
     
     reader.onloadstart = () => {
@@ -1388,10 +1390,10 @@ export default function MMSEChatbotPage() {
       if (event.target?.result) {
         try {
           // ✅ FIX: Use the file directly or create blob with proper type
-          const blob = file instanceof Blob ? file : new Blob([event.target.result], { type: file.type || 'audio/webm' });
+          const blob = file instanceof Blob ? file : new Blob([event.target.result], { type: fileType });
           setCurrentAudioBlob(blob);
           
-          console.log(`✅ File uploaded: ${file.name} (${(file.size / 1024).toFixed(1)} KB, type: ${file.type || 'unknown'})`);
+          console.log(`✅ File uploaded: ${file.name} (${(file.size / 1024).toFixed(1)} KB, type: ${fileType})`);
           console.log(`   Blob created: size=${blob.size} bytes, type=${blob.type}`);
           
           // ✅ TRANSCRIBE ONLY: Transcribe audio and show in input box for editing
