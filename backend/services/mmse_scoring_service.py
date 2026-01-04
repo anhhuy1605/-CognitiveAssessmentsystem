@@ -427,6 +427,11 @@ Trả về JSON:
         """Generate feedback based on score"""
         feedback_templates = question.get('feedback', {})
         
+        # ✅ FIX: Ensure feedback_templates is a dict, not a string
+        if not isinstance(feedback_templates, dict):
+            logger.warning(f"⚠️ feedback_templates is not a dict (type: {type(feedback_templates)}), using default")
+            feedback_templates = {}
+        
         # Map points to feedback key
         if points_earned == points_possible:
             key = f"{points_possible}_correct" if points_possible > 1 else "correct"
@@ -435,7 +440,15 @@ Trả về JSON:
         else:
             key = f"{points_earned}_correct"
         
-        feedback = feedback_templates.get(key, feedback_templates.get('correct' if validation.get('is_correct') else 'incorrect', 'Cảm ơn!'))
+        # ✅ FIX: Safe get with fallback
+        feedback = feedback_templates.get(key)
+        if not feedback:
+            fallback_key = 'correct' if validation.get('is_correct') else 'incorrect'
+            feedback = feedback_templates.get(fallback_key, 'Cảm ơn!')
+        
+        # ✅ FIX: Ensure feedback is a string
+        if not isinstance(feedback, str):
+            feedback = str(feedback) if feedback else 'Cảm ơn!'
         
         # Replace placeholders
         correct_answer = question.get('correct_answer', '')

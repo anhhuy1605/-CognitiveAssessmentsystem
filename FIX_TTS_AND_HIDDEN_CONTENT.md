@@ -24,3 +24,7 @@
 - Thêm save/export functionality
 - Submit image để validate bằng GPT
 
+
+
+
+

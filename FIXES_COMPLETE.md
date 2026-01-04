@@ -60,3 +60,7 @@
 2. **TTS**: Đọc đầy đủ content kể cả phần ẩn
 3. **Clock Drawing**: Modal popup với đầy đủ tính năng vẽ như ứng dụng note
 
+
+
+
+

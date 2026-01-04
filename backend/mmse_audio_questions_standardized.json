@@ -170,10 +170,11 @@
         "reg_01": {
           "question_id": "reg_01",
           "instruction": "Bây giờ {pronoun} hãy chú ý lắng nghe nhé. Tôi sẽ đọc 3 từ, {pronoun} hãy nhớ kỹ.",
+          "instruction_hidden": true,
           "words_announcement": "Ba từ đó là: Con mèo, Chiếc xe, Cây lúa.",
           "words_announcement_hidden": true,
           "words_announcement_tts": true,
-          "question": "{Pronoun} hãy nhắc lại 3 từ vừa nghe được không?",
+          "question": "{Pronoun} hãy nhắc lại 3 từ nghe được nhé.",
           "words": ["Con mèo", "Chiếc xe", "Cây lúa"],
           "words_to_recall": ["Con mèo", "Chiếc xe", "Cây lúa"],
           "keywords": ["mèo", "xe", "lúa"],
@@ -357,10 +358,10 @@
           "instruction_hidden": true,
           "instruction_tts": false,
           "question": "{Pronoun} nhắc lại nhé!",
-          "sentence_to_repeat": "Không có nếu, và, hoặc nhưng gì cả",
+          "sentence_to_repeat": "Có vất vả mới thanh nhàn, không dưng ai dễ cầm tàn che cho",
           "sentence_to_repeat_hidden": false,
           "sentence_to_repeat_tts": true,
-          "correct_answer": "Không có nếu, và, hoặc nhưng gì cả",
+          "correct_answer": "Có vất vả mới thanh nhàn, không dưng ai dễ cầm tàn che cho",
           "points": 1,
           "scoring": {
             "method": "exact_match_required",
@@ -368,13 +369,13 @@
           },
           "feedback": {
             "correct": "Hoàn hảo! {Pronoun} nhắc lại chính xác!",
-            "incorrect": "Không sao {pronoun}. Câu đúng là: 'Không có nếu, và, hoặc nhưng gì cả.'"
+            "incorrect": "Không sao {pronoun}. Câu đúng là: 'Có vất vả mới thanh nhàn, không dưng ai dễ cầm tàn che cho.'"
           }
         },
         
         "lang_comprehension_3step": {
           "question_id": "lang_comprehension_3step",
-          "question": "Bây giờ tôi sẽ yêu cầu {pronoun} làm 3 việc bằng cách NÓI.\n\n{Pronoun} hãy làm theo thứ tự nhé. Bắt đầu!",
+          "question": "Bây giờ tôi sẽ yêu cầu {pronoun} làm 3 việc bằng cách NÓI.\n\n**Thứ nhất:** Nói 'Tôi hiểu rồi'\n**Thứ hai:** Đếm từ 1 đến 3\n**Thứ ba:** Nói 'Xong rồi'\n\n{Pronoun} hãy làm theo thứ tự nhé. Bắt đầu!",
           "points": 3,
           "scoring": {
             "method": "count_steps_completed",
@@ -392,8 +393,8 @@
         
         "lang_comprehension_listening": {
           "question_id": "lang_comprehension_listening",
-          "instruction": "Tôi sẽ đọc một câu, {pronoun} lắng nghe rồi trả lời câu hỏi nhé.",
-          "sentence_to_listen": "Con ong đang làm tổ trên cây",
+          "instruction": "Tôi sẽ đọc một câu, {pronoun} lắng nghe rồi cho biết con ong đang làm gì nhé.",
+          "sentence_to_listen": "Một chú ong vàng đang cần mẫn làm tổ trên cành cây xanh mát",
           "sentence_to_listen_hidden": true,
           "sentence_to_listen_tts": true,
           "question": "{Pronoun} cho biết con ong đang làm gì?",

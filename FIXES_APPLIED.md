@@ -47,3 +47,7 @@ if domain != TestDomain.COMPLETED:
 2. Results page không còn crash với TypeError
 3. questionResults luôn được trả về dạng array
 
+
+
+
+

@@ -150,21 +150,78 @@ export default function ChatInterface({
 
   // Handle file upload
   const handleFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    console.log("📁 ChatInterface: handleFileUpload called", e.target.files);
+    
     const file = e.target.files?.[0];
-    if (!file) return;
-
-    // Validate file type
-    if (!file.type.startsWith('audio/')) {
-      alert('Vui lòng chọn file audio');
+    if (!file) {
+      console.warn("⚠️ ChatInterface: No file selected");
       return;
     }
 
+    console.log(`📄 ChatInterface: File selected: ${file.name}, size: ${(file.size / 1024).toFixed(1)} KB, type: ${file.type || 'unknown'}`);
+
+    // Validate file type
+    const validTypes = ['audio/wav', 'audio/mp3', 'audio/mpeg', 'audio/webm', 'audio/ogg', 'audio/m4a', 'audio/x-m4a'];
+    const isValidType = validTypes.includes(file.type) || file.type.startsWith('audio/') || file.name.match(/\.(wav|mp3|webm|ogg|m4a)$/i);
+    
+    if (!isValidType) {
+      console.error("❌ ChatInterface: Invalid file type:", file.type);
+      alert('Vui lòng chọn file audio hợp lệ (WAV, MP3, WebM, OGG, M4A)');
+      return;
+    }
+
+    // Validate file size (max 10MB)
+    const maxSize = 10 * 1024 * 1024; // 10MB
+    if (file.size > maxSize) {
+      console.error("❌ ChatInterface: File too large:", file.size);
+      alert('File quá lớn. Vui lòng chọn file nhỏ hơn 10MB');
+      return;
+    }
+
+    console.log("✅ ChatInterface: File validation passed, starting FileReader...");
+
     // Read file as blob and submit
     const reader = new FileReader();
-    reader.onload = async () => {
-      const blob = new Blob([reader.result as ArrayBuffer], { type: file.type });
-      onSendMessage('', blob);
+    
+    reader.onloadstart = () => {
+      console.log("📖 ChatInterface: FileReader onloadstart");
     };
+    
+    reader.onprogress = (event) => {
+      if (event.lengthComputable) {
+        const percentLoaded = Math.round((event.loaded / event.total) * 100);
+        console.log(`📖 ChatInterface: FileReader progress ${percentLoaded}%`);
+      }
+    };
+    
+    reader.onload = async () => {
+      console.log("📖 ChatInterface: FileReader onload - File read complete");
+      try {
+        const blob = new Blob([reader.result as ArrayBuffer], { type: file.type || 'audio/webm' });
+        console.log(`✅ ChatInterface: Blob created: size=${blob.size} bytes, type=${blob.type}`);
+        console.log("📤 ChatInterface: Calling onSendMessage with blob...");
+        onSendMessage('', blob);
+      } catch (error: any) {
+        console.error("❌ ChatInterface: Error creating blob or sending:", error);
+        alert(`Lỗi khi xử lý file: ${error.message || 'Unknown error'}`);
+      }
+    };
+    
+    reader.onerror = (error) => {
+      console.error("❌ ChatInterface: FileReader error:", error);
+      alert('Lỗi khi đọc file. Vui lòng thử lại.');
+    };
+    
+    reader.onabort = () => {
+      console.warn("⚠️ ChatInterface: FileReader aborted");
+      alert('Đọc file bị hủy. Vui lòng thử lại.');
+    };
+    
+    reader.onloadend = () => {
+      console.log("📖 ChatInterface: FileReader onloadend");
+    };
+    
+    console.log("📖 ChatInterface: Starting FileReader.readAsArrayBuffer...");
     reader.readAsArrayBuffer(file);
   }, [onSendMessage]);
 

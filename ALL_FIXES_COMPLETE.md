@@ -76,3 +76,7 @@
 3. Test clock drawing modal - verify tất cả tính năng hoạt động
 4. Test submit image - verify image được gửi đến backend để validate bằng GPT
 
+
+
+
+

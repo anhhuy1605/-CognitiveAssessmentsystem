@@ -969,7 +969,7 @@ export default function MMSEChatbotPage() {
 
     setTimeout(() => {
       addBotMessage(session, 
-        `📊 **Tổng điểm MMSE của ${session.greeting}: ${session.totalScore}/30**\n\n` +
+        `📊 **Tổng điểm MMSE của ${session.greeting}: ${session.totalScore}/35**\n\n` +
         getScoreInterpretation(session.totalScore)
       );
     }, 1500);
@@ -1723,7 +1723,7 @@ export default function MMSEChatbotPage() {
                   {/* ✅ Score Display (separate from progress) */}
                   <div className="text-right">
                     <div className="text-2xl font-bold text-blue-600">
-                      {session.totalScore}/30
+                      {session.totalScore}/35
                     </div>
                     <div className="text-xs text-gray-500">điểm</div>
                   </div>
@@ -1737,14 +1737,14 @@ export default function MMSEChatbotPage() {
                       initial={{ width: 0 }}
                       animate={{ 
                         width: `${session.messages.filter(m => m.type === "user").length > 0 
-                          ? (session.messages.filter(m => m.type === "user").length / 30) * 100 
+                          ? (session.messages.filter(m => m.type === "user").length / 28) * 100 
                           : 0}%` 
                       }}
                       transition={{ duration: 0.5, ease: "easeOut" }}
                     />
                   </div>
                   <span className="text-sm text-gray-600 font-medium min-w-[60px] text-right">
-                    {session.messages.filter(m => m.type === "user").length}/30 câu
+                    {session.messages.filter(m => m.type === "user").length}/28 câu
                   </span>
                 </div>
                 

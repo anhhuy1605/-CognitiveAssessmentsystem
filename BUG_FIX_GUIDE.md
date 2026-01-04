@@ -168,3 +168,7 @@ Sau khi fix:
 - Backend và Frontend cần sync về hidden_content
 - QuestionTypeRenderer cần đúng question ID matching
 
+
+
+
+

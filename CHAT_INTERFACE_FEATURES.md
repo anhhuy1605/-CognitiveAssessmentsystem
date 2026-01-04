@@ -85,3 +85,7 @@ interface ChatInterfaceProps {
 - [ ] UI is responsive
 - [ ] Elderly-friendly design verified
 
+
+
+
+

@@ -61,17 +61,22 @@ export async function generatePDF(resultsData: any, sessionId: string) {
 
     pdf.setFontSize(10);
     pdf.setFont('helvetica', 'normal');
-    pdf.text(`Điểm MMSE thô: ${resultsData.assessment_result.raw_score.toFixed(1)}/35`, margin, yPos);
+    pdf.text(`Điểm MMSE thô: ${(resultsData.assessment_result.raw_score ?? 0).toFixed(1)}/35`, margin, yPos);
     yPos += 5;
 
-    if (resultsData.assessment_result.adjusted_score) {
-      pdf.text(`Điểm điều chỉnh: ${resultsData.assessment_result.adjusted_score.toFixed(1)}/35`, margin, yPos);
+    if (resultsData.assessment_result.converted_mmse30) {
+      pdf.text(`Tương đương MMSE chuẩn: ${(resultsData.assessment_result.converted_mmse30 ?? 0).toFixed(1)}/30`, margin, yPos);
       yPos += 5;
     }
 
-    pdf.text(`Mức độ nguy cơ: ${resultsData.assessment_result.risk_level_label}`, margin, yPos);
+    if (resultsData.assessment_result.adjusted_score) {
+      pdf.text(`Điểm điều chỉnh: ${(resultsData.assessment_result.adjusted_score ?? 0).toFixed(1)}/35`, margin, yPos);
+      yPos += 5;
+    }
+
+    pdf.text(`Mức độ nguy cơ: ${resultsData.assessment_result.risk_level_label || 'N/A'}`, margin, yPos);
     yPos += 5;
-    pdf.text(`Xác suất MCI: ${(resultsData.assessment_result.mci_probability * 100).toFixed(1)}%`, margin, yPos);
+    pdf.text(`Xác suất MCI: ${((resultsData.assessment_result.mci_probability ?? 0) * 100).toFixed(1)}%`, margin, yPos);
     yPos += 10;
 
     // Clinical Thresholds
@@ -82,14 +87,14 @@ export async function generatePDF(resultsData: any, sessionId: string) {
 
     pdf.setFontSize(10);
     pdf.setFont('helvetica', 'normal');
-    const thresholds = resultsData.assessment_result.thresholds;
-    pdf.text(`• Bình thường: ≥ ${thresholds.normal.min} điểm`, margin + 5, yPos);
+    const thresholds = resultsData.assessment_result.thresholds || {};
+    pdf.text(`• Bình thường: ≥ ${thresholds.normal?.min ?? 24} điểm`, margin + 5, yPos);
     yPos += 5;
-    pdf.text(`• MCI nhẹ: ${thresholds.mild_mci.min}-${thresholds.mild_mci.max} điểm`, margin + 5, yPos);
+    pdf.text(`• MCI nhẹ: ${thresholds.mild_mci?.min ?? 18}-${thresholds.mild_mci?.max ?? 23} điểm`, margin + 5, yPos);
     yPos += 5;
-    pdf.text(`• Sa sút trí tuệ vừa: ${thresholds.moderate.min}-${thresholds.moderate.max} điểm`, margin + 5, yPos);
+    pdf.text(`• Sa sút trí tuệ vừa: ${thresholds.moderate?.min ?? 10}-${thresholds.moderate?.max ?? 17} điểm`, margin + 5, yPos);
     yPos += 5;
-    pdf.text(`• Sa sút trí tuệ nặng: < ${thresholds.severe.max + 1} điểm`, margin + 5, yPos);
+    pdf.text(`• Sa sút trí tuệ nặng: < ${(thresholds.severe?.max ?? 9) + 1} điểm`, margin + 5, yPos);
     yPos += 10;
 
     // Feature Summary
@@ -133,16 +138,22 @@ export async function generatePDF(resultsData: any, sessionId: string) {
       resultsData.shap_explanation.top_risk_factors.forEach((factor: any, idx: number) => {
         checkNewPage(15);
         pdf.setFont('helvetica', 'bold');
-        pdf.text(`${idx + 1}. ${factor.feature_name_vi} (${factor.feature_name_en})`, margin, yPos);
+        pdf.text(`${idx + 1}. ${factor.feature_name_vi || 'N/A'} (${factor.feature_name_en || 'N/A'})`, margin, yPos);
         yPos += 5;
         pdf.setFont('helvetica', 'normal');
-        pdf.text(`   SHAP Value: +${factor.shap_value.toFixed(3)}`, margin + 5, yPos);
+        pdf.text(`   SHAP Value: +${(factor.shap_value ?? 0).toFixed(3)}`, margin + 5, yPos);
         yPos += 4;
-        pdf.text(`   Giá trị: ${factor.value.toFixed(3)} (${factor.comparison})`, margin + 5, yPos);
+        pdf.text(`   Giá trị: ${(factor.value ?? 0).toFixed(3)} (${factor.comparison || 'N/A'})`, margin + 5, yPos);
         yPos += 4;
-        pdf.text(`   Ảnh hưởng: ${factor.interpretation}`, margin + 5, yPos);
+        const interpretation = typeof factor.interpretation === 'string' 
+          ? factor.interpretation 
+          : (factor.interpretation?.description || 'N/A');
+        pdf.text(`   Ảnh hưởng: ${interpretation}`, margin + 5, yPos);
         yPos += 4;
-        pdf.text(`   Khuyến nghị: ${factor.recommendation}`, margin + 5, yPos);
+        const recommendation = typeof factor.recommendation === 'string' 
+          ? factor.recommendation 
+          : (factor.recommendation?.title || factor.recommendation?.description || 'N/A');
+        pdf.text(`   Khuyến nghị: ${recommendation}`, margin + 5, yPos);
         yPos += 6;
       });
     }
@@ -157,10 +168,29 @@ export async function generatePDF(resultsData: any, sessionId: string) {
 
       pdf.setFontSize(10);
       pdf.setFont('helvetica', 'normal');
-      resultsData.recommendations.forEach((rec: string) => {
-        checkNewPage(5);
-        pdf.text(`• ${rec}`, margin + 5, yPos);
-        yPos += 5;
+      resultsData.recommendations.forEach((rec: any) => {
+        checkNewPage(10);
+        if (typeof rec === 'string') {
+          pdf.text(`• ${rec}`, margin + 5, yPos);
+          yPos += 5;
+        } else if (typeof rec === 'object' && rec !== null) {
+          // Handle structured recommendation object
+          pdf.setFont('helvetica', 'bold');
+          pdf.text(`• ${rec.title || 'Khuyến nghị'}`, margin + 5, yPos);
+          yPos += 4;
+          pdf.setFont('helvetica', 'normal');
+          if (rec.description) {
+            pdf.text(`  ${rec.description}`, margin + 10, yPos);
+            yPos += 4;
+          }
+          if (rec.actions && Array.isArray(rec.actions)) {
+            rec.actions.forEach((action: string) => {
+              pdf.text(`  - ${action}`, margin + 10, yPos);
+              yPos += 4;
+            });
+          }
+          yPos += 2;
+        }
       });
       yPos += 5;
     }
@@ -218,4 +248,6 @@ export async function generatePDF(resultsData: any, sessionId: string) {
     throw error;
   }
 }
+
+
 

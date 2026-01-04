@@ -14,11 +14,59 @@ Version: 1.0
 """
 
 import logging
+import json
 import numpy as np
 from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
+
+# Import clinical ranges and helpers
+try:
+    from services.comprehensive_results_clinical_ranges import (
+        ACOUSTIC_CLINICAL_RANGES,
+        LINGUISTIC_CLINICAL_RANGES,
+        FEATURE_IMPORTANCE_WEIGHTS
+    )
+    from services.comprehensive_results_clinical_helpers import (
+        determine_clinical_range,
+        get_normal_range_for_display,
+        determine_impact_direction,
+        calculate_percentile,
+        generate_acoustic_interpretation,
+        generate_linguistic_interpretation
+    )
+    # Import physician report generator
+    from services.physician_report_generator import PhysicianStyleReportGenerator
+    REPORT_GENERATOR_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"⚠️ Clinical ranges not available - using default interpretations: {e}")
+    ACOUSTIC_CLINICAL_RANGES = {}
+    LINGUISTIC_CLINICAL_RANGES = {}
+    FEATURE_IMPORTANCE_WEIGHTS = {}
+    REPORT_GENERATOR_AVAILABLE = False
+    # Define minimal stubs
+    def determine_clinical_range(value, ranges, gender=None):
+        return 'normal'
+    def get_normal_range_for_display(ranges, gender=None):
+        return ranges.get('normal', (0, 1)) if isinstance(ranges.get('normal'), tuple) else (0, 1)
+    def determine_impact_direction(shap_value):
+        return 'neutral'
+
+# Import enhanced feature analyzer
+try:
+    from services.feature_analyzer import FeatureAnalyzer
+    feature_analyzer = FeatureAnalyzer()
+    logger.info("✅ Enhanced FeatureAnalyzer loaded")
+except ImportError as e:
+    logger.warning(f"⚠️ Enhanced FeatureAnalyzer not available: {e}")
+    feature_analyzer = None
+    def calculate_percentile(value, feature_name, gender=None, age=65):
+        return 50
+    def generate_acoustic_interpretation(feature_name, feature_value, clinical_range, ranges, age, gender):
+        return f"Feature {feature_name}: {feature_value}"
+    def generate_linguistic_interpretation(feature_name, feature_value, clinical_range, ranges):
+        return f"Feature {feature_name}: {feature_value}"
 
 # Clinical Citations
 CLINICAL_CITATIONS = {
@@ -85,29 +133,80 @@ CLINICAL_CITATIONS = {
     }
 }
 
+# MMSE Score Conversion: 35-point scale (MEC) to 30-point scale (MMSE standard)
+def convert_35_to_30_mmse(domain_scores: Dict[str, int]) -> int:
+    """
+    Convert MMSE score from 35-point scale (MEC) to 30-point scale (MMSE standard)
+    
+    Based on analysis:
+    - Orientation: 10 points (keep)
+    - Registration: 3 points (keep)
+    - Attention: 5 points (keep)
+    - Recall: 3 points (keep)
+    - Language: 8 points (keep)
+    - Visuospatial: 3 points → 1 point (if ≥2 then 1, else 0)
+    - Executive Function: 3 points → 0 points (not in MMSE 30)
+    
+    Args:
+        domain_scores: Dictionary with domain scores from 35-point scale
+        
+    Returns:
+        Converted MMSE score (0-30)
+    """
+    mmse_30 = (
+        domain_scores.get('orientation', 0) +      # 10 points
+        domain_scores.get('registration', 0) +     # 3 points
+        domain_scores.get('attention_calculation', 0) +  # 5 points
+        domain_scores.get('recall', 0) +           # 3 points
+        domain_scores.get('language', 0) +         # 8 points
+        (1 if domain_scores.get('visuospatial', 0) >= 2 else 0)  # 1 point (converted)
+    )
+    # Executive function is excluded (not in MMSE 30)
+    
+    return min(max(0, mmse_30), 30)  # Clamp to 0-30
+
+
+def convert_35_to_30_linear(score_35: float) -> float:
+    """
+    Simple linear conversion from 35 to 30 points
+    
+    Formula: MMSE_30 = (Score_35 / 35) × 30
+    
+    Args:
+        score_35: Score on 35-point scale
+        
+    Returns:
+        Converted score on 30-point scale
+    """
+    return (score_35 / 35.0) * 30.0
+
+
 # Clinical Thresholds
+# ✅ UPDATED: Thresholds for 35-point MEC scale
 CLINICAL_THRESHOLDS = {
     'mmse': {
-        'normal': {'min': 24, 'max': 35, 'description': 'Normal cognitive function', 'citation': 'mmse'},
-        'mild_mci': {'min': 18, 'max': 23, 'description': 'Mild Cognitive Impairment', 'citation': 'mci_detection'},
-        'moderate': {'min': 10, 'max': 17, 'description': 'Moderate Dementia', 'citation': 'mmse'},
-        'severe': {'min': 0, 'max': 9, 'description': 'Severe Dementia', 'citation': 'mmse'}
+        # 35-point scale thresholds (MEC)
+        'normal': {'min': 28, 'max': 35, 'description': 'Normal cognitive function (MEC 35-point scale)', 'citation': 'mec_lobo_1979'},
+        'mild_mci': {'min': 25, 'max': 27, 'description': 'Mild Cognitive Impairment (MEC 35-point scale)', 'citation': 'mci_detection'},
+        'moderate': {'min': 12, 'max': 24, 'description': 'Moderate Dementia (MEC 35-point scale)', 'citation': 'mmse'},
+        'severe': {'min': 0, 'max': 11, 'description': 'Severe Dementia (MEC 35-point scale)', 'citation': 'mmse'}
     },
     'mmse_adjusted': {
+        # ✅ UPDATED: Education-adjusted thresholds for 35-point MEC scale
         'low_education': {
-            'normal': {'min': 23, 'max': 35, 'description': 'Normal (low education ≤9 years)', 'citation': 'mmse_adjusted'},
-            'mci_lower': {'min': 20, 'max': 22, 'description': 'MCI lower bound (low education)', 'citation': 'mmse_adjusted'},
-            'dementia': {'min': 0, 'max': 19, 'description': 'Dementia threshold (low education)', 'citation': 'mmse_adjusted'}
+            'normal': {'min': 21, 'max': 35, 'description': 'Normal (low education ≤9 years, MEC 35-point)', 'citation': 'mmse_adjusted'},
+            'mci_lower': {'min': 18, 'max': 20, 'description': 'MCI lower bound (low education, MEC 35-point)', 'citation': 'mmse_adjusted'},
+            'dementia': {'min': 0, 'max': 17, 'description': 'Dementia threshold (low education, MEC 35-point)', 'citation': 'mmse_adjusted'}
         },
         'medium_education': {
-            'normal': {'min': 28, 'max': 35, 'description': 'Normal (medium education 10-12 years)', 'citation': 'mmse_adjusted'},
-            'mci_lower': {'min': 24, 'max': 27, 'description': 'MCI lower bound (medium education)', 'citation': 'mmse_adjusted'},
-            'dementia': {'min': 0, 'max': 23, 'description': 'Dementia threshold (medium education)', 'citation': 'mmse_adjusted'}
+            'normal': {'min': 28, 'max': 35, 'description': 'Normal (medium education 10-12 years, MEC 35-point)', 'citation': 'mmse_adjusted'},
+            'mci_lower': {'min': 25, 'max': 27, 'description': 'MCI lower bound (medium education, MEC 35-point)', 'citation': 'mmse_adjusted'},
+            'dementia': {'min': 0, 'max': 24, 'description': 'Dementia threshold (medium education, MEC 35-point)', 'citation': 'mmse_adjusted'}
         },
         'high_education': {
-            'normal': {'min': 31, 'max': 35, 'description': 'Normal (high education >12 years)', 'citation': 'mmse_adjusted'},
-            'mci_lower': {'min': 28, 'max': 30, 'description': 'MCI lower bound (high education)', 'citation': 'mmse_adjusted'},
-            'dementia': {'min': 0, 'max': 27, 'description': 'Dementia threshold (high education)', 'citation': 'mmse_adjusted'}
+            'normal': {'min': 31, 'max': 35, 'description': 'Normal (high education >12 years, MEC 35-point)', 'citation': 'mmse_adjusted'},
+            'mci_lower': {'min': 29, 'max': 30, 'description': 'MCI lower bound (high education, MEC 35-point)', 'citation': 'mmse_adjusted'},
+            'dementia': {'min': 0, 'max': 28, 'description': 'Dementia threshold (high education, MEC 35-point)', 'citation': 'mmse_adjusted'}
         }
     },
     'acoustic': {
@@ -211,51 +310,174 @@ def generate_comprehensive_results(
     """
     logger.info("📊 Generating comprehensive results...")
     
-    # 1. Assessment Result
-    assessment_result = _build_assessment_result(session_state)
-    
-    # 2. Feature Summary
-    feature_summary = _build_feature_summary(session_state)
-    
-    # 3. Detailed Analysis
-    detailed_analysis = _build_detailed_analysis(session_state)
-    
-    # 4. SHAP Explanation
-    shap_explanation = _build_shap_explanation(session_state, shap_explanations)
-    
-    # 5. Recommendations
-    recommendations = _build_recommendations(session_state, shap_explanation)
-    
-    # 6. Citations
-    citations = _build_citations_list(session_state, shap_explanation)
-    
-    # 7. Clinical Interpretation
-    clinical_interpretation = _build_clinical_interpretation(session_state, assessment_result)
-    
-    return {
-        'assessment_result': assessment_result,
-        'feature_summary': feature_summary,
-        'detailed_analysis': detailed_analysis,
-        'shap_explanation': shap_explanation,
-        'recommendations': recommendations,
-        'citations': citations,
-        'clinical_interpretation': clinical_interpretation,
-        'metadata': {
-            'session_id': session_state.session_id if hasattr(session_state, 'session_id') else 'unknown',
-            'timestamp': datetime.now().isoformat(),
-            'version': '1.0',
-            'model_version': 'v2.1'
+    try:
+        # 1. Assessment Result
+        try:
+            assessment_result = _build_assessment_result(session_state)
+        except Exception as e:
+            logger.warning(f"⚠️ Error building assessment_result, using defaults: {e}")
+            assessment_result = {
+                'mmse_score': getattr(session_state, 'total_score', 0) or 0,
+                'risk_level': 'on',
+                'classification': 'Unknown'
+            }
+        
+        # 2. Feature Summary
+        try:
+            feature_summary = _build_feature_summary(session_state)
+        except Exception as e:
+            logger.warning(f"⚠️ Error building feature_summary, using defaults: {e}")
+            feature_summary = {
+                'acoustic_feature_count': 0,
+                'linguistic_feature_count': 0,
+                'total_features': 0,
+                'total_abnormal_features': 0
+            }
+        
+        # 3. Detailed Analysis
+        try:
+            detailed_analysis = _build_detailed_analysis(session_state)
+        except Exception as e:
+            logger.warning(f"⚠️ Error building detailed_analysis, using defaults: {e}")
+            detailed_analysis = {'acoustic': {}, 'linguistic': {}}
+        
+        # 4. SHAP Explanation
+        try:
+            shap_explanation = _build_shap_explanation(session_state, shap_explanations)
+        except Exception as e:
+            logger.warning(f"⚠️ Error building shap_explanation, using defaults: {e}")
+            shap_explanation = {
+                'top_risk_factors': [],
+                'top_protective_factors': [],
+                'note': 'SHAP explanation generation failed'
+            }
+        
+        # 5. Recommendations
+        try:
+            recommendations = _build_recommendations(session_state, shap_explanation)
+        except Exception as e:
+            logger.warning(f"⚠️ Error building recommendations, using defaults: {e}")
+            recommendations = []
+        
+        # 6. Citations
+        try:
+            citations = _build_citations_list(session_state, shap_explanation)
+        except Exception as e:
+            logger.warning(f"⚠️ Error building citations, using defaults: {e}")
+            citations = []
+        
+        # 7. Clinical Interpretation
+        try:
+            clinical_interpretation = _build_clinical_interpretation(session_state, assessment_result)
+        except Exception as e:
+            logger.warning(f"⚠️ Error building clinical_interpretation, using defaults: {e}")
+            clinical_interpretation = {}
+        
+        # 8. Multimodal Analysis
+        try:
+            multimodal_analysis = _build_multimodal_analysis(session_state, detailed_analysis)
+        except Exception as e:
+            logger.warning(f"⚠️ Error building multimodal_analysis, using defaults: {e}")
+            multimodal_analysis = {
+                'acoustic_features': {},
+                'linguistic_features': {},
+                'combined_risk_score': 0.0,
+                'risk_level': 'on'
+            }
+        
+        # Build metadata safely
+        try:
+            session_id = session_state.session_id if hasattr(session_state, 'session_id') else 'unknown'
+        except:
+            session_id = 'unknown'
+        
+        # ✅ FIX: Add Q&A history and per-question features
+        qa_history = getattr(session_state, 'qa_pairs', [])
+        question_features = getattr(session_state, 'question_features', {})
+        
+        result = {
+            'assessment_result': assessment_result,
+            'feature_summary': feature_summary,
+            'detailed_analysis': detailed_analysis,
+            'multimodal_analysis': multimodal_analysis,
+            'shap_explanation': shap_explanation,
+            'recommendations': recommendations,
+            'citations': citations,
+            'clinical_interpretation': clinical_interpretation,
+            'metadata': {
+                'session_id': session_id,
+                'timestamp': datetime.now().isoformat(),
+                'version': '1.0',
+                'model_version': 'v2.1',
+                'features_extracted': {
+                    'acoustic': len(detailed_analysis.get('acoustic', {})) > 0,
+                    'linguistic': len(detailed_analysis.get('linguistic', {})) > 0
+                }
+            }
         }
-    }
+        
+        # Add Q&A history if available
+        if qa_history:
+            result['qa_history'] = qa_history
+            logger.info(f"✅ Added Q&A history: {len(qa_history)} pairs")
+        
+        # Add per-question features if available
+        if question_features:
+            result['question_features'] = question_features
+            logger.info(f"✅ Added per-question features: {len(question_features)} questions")
+        
+        # 9. Generate Physician-Style Report (if available)
+        if REPORT_GENERATOR_AVAILABLE:
+            try:
+                # Add user_info to result for report generator
+                user_info = getattr(session_state, 'user_info', {}) or {}
+                result['user_info'] = user_info
+                
+                # Generate physician-style report
+                report_generator = PhysicianStyleReportGenerator()
+                physician_report = report_generator.generate_complete_report(result)
+                result['physician_report'] = physician_report
+                logger.info("✅ Generated physician-style report")
+            except Exception as e:
+                logger.warning(f"⚠️ Error generating physician report: {e}", exc_info=True)
+                result['physician_report'] = {"error": str(e)}
+        else:
+            logger.info("ℹ️ Physician report generator not available")
+        
+        return result
+    except Exception as e:
+        logger.error(f"❌ Critical error in generate_comprehensive_results: {e}", exc_info=True)
+        # Return minimal valid structure
+        return {
+            'assessment_result': {
+                'mmse_score': 0,
+                'risk_level': 'on',
+                'classification': 'Error'
+            },
+            'feature_summary': {'total_features': 0},
+            'detailed_analysis': {'acoustic': {}, 'linguistic': {}},
+            'multimodal_analysis': {'combined_risk_score': 0.0, 'risk_level': 'on'},
+            'shap_explanation': {'note': 'Generation failed'},
+            'recommendations': [],
+            'citations': [],
+            'clinical_interpretation': {},
+            'metadata': {
+                'session_id': 'unknown',
+                'timestamp': datetime.now().isoformat(),
+                'version': '1.0',
+                'error': str(e)
+            }
+        }
 
 
 def _build_assessment_result(session_state: Any) -> Dict[str, Any]:
     """Build assessment result section"""
     raw_score = session_state.total_score or 0
     adjusted_score = None
-    age = session_state.user_info.get('age', 65) if hasattr(session_state, 'user_info') else 65
+    user_info = session_state.user_info if (hasattr(session_state, 'user_info') and session_state.user_info) else {}
+    age = user_info.get('age', 65) if isinstance(user_info, dict) else 65
     # ✅ FIX: Convert education_years to int if it's a string
-    education_years_raw = session_state.user_info.get('education_years', 12) if hasattr(session_state, 'user_info') else 12
+    education_years_raw = user_info.get('education_years', 12) if isinstance(user_info, dict) else 12
     try:
         education_years = int(education_years_raw) if education_years_raw else 12
     except (ValueError, TypeError):
@@ -264,6 +486,17 @@ def _build_assessment_result(session_state: Any) -> Dict[str, Any]:
     # Get adjusted score if available
     if hasattr(session_state, 'mci_result') and session_state.mci_result:
         adjusted_score = session_state.mci_result.get('adjusted_mmse_score')
+    
+    # ✅ NEW: Calculate converted MMSE 30 score from 35-point scale
+    converted_mmse30 = None
+    if hasattr(session_state, 'domain_scores') and session_state.domain_scores:
+        try:
+            converted_mmse30 = convert_35_to_30_mmse(session_state.domain_scores)
+            logger.info(f"📊 Converted MMSE 30: {converted_mmse30}/30 (from {raw_score}/35)")
+        except Exception as e:
+            logger.warning(f"⚠️ Error converting 35→30: {e}")
+            # Fallback to linear conversion
+            converted_mmse30 = round(convert_35_to_30_linear(float(raw_score)))
     
     # Calculate risk level
     risk_level = 'on'
@@ -281,6 +514,9 @@ def _build_assessment_result(session_state: Any) -> Dict[str, Any]:
         'mmse_estimate': float(adjusted_score) if adjusted_score else float(raw_score),
         'adjusted_score': float(adjusted_score) if adjusted_score else None,
         'raw_score': float(raw_score),
+        'converted_mmse30': float(converted_mmse30) if converted_mmse30 is not None else None,  # ✅ NEW: MMSE 30 equivalent
+        'max_score_35': 35,  # ✅ NEW: Indicate 35-point scale
+        'max_score_30': 30,  # ✅ NEW: Standard MMSE scale
         'age': age,
         'education_years': education_years,
         'mci_probability': float(mci_probability),
@@ -295,7 +531,17 @@ def _build_assessment_result(session_state: Any) -> Dict[str, Any]:
             'moderate': CLINICAL_THRESHOLDS['mmse']['moderate'],
             'severe': CLINICAL_THRESHOLDS['mmse']['severe']
         },
-        'education_specific_thresholds': _get_education_thresholds(education_years)
+        'education_specific_thresholds': _get_education_thresholds(education_years),
+        'scale_info': {  # ✅ NEW: Information about the 35-point scale
+            'scale_type': 'MEC_35',
+            'description': 'Mini-Examen-Cognoscivo (MEC) - 35 điểm, mở rộng từ MMSE 30 điểm chuẩn',
+            'citation': 'Lobo et al. (1979), Modrego et al. (2005, 2013)',
+            'differences': {
+                'visuospatial': '3 điểm (thay vì 1) - Clock Drawing Test đầy đủ',
+                'executive_function': '3 điểm (mới thêm) - Verbal fluency + Abstraction',
+                'total_questions': '28 câu chấm điểm + 4 câu mở (tổng 32 câu)'
+            }
+        }
     }
 
 
@@ -309,18 +555,30 @@ def _build_feature_summary(session_state: Any) -> Dict[str, Any]:
     # Count acoustic features
     if hasattr(session_state, 'acoustic_features') and session_state.acoustic_features:
         for question_id, features in session_state.acoustic_features.items():
-            acoustic_count += len(features)
-            # Check for abnormal values
-            for feat_name, feat_value in features.items():
-                if _is_abnormal_feature(feat_name, feat_value, 'acoustic'):
-                    abnormal_acoustic += 1
+            if isinstance(features, dict):
+                acoustic_count += len(features)
+                # Check for abnormal values
+                for feat_name, feat_value in features.items():
+                    # ✅ FIX: Only check if value is numeric
+                    if isinstance(feat_value, (int, float, np.number)):
+                        try:
+                            if _is_abnormal_feature(feat_name, float(feat_value), 'acoustic'):
+                                abnormal_acoustic += 1
+                        except (TypeError, ValueError):
+                            pass
     
     # Count linguistic features
     if hasattr(session_state, 'linguistic_features') and session_state.linguistic_features:
-        linguistic_count = len(session_state.linguistic_features)
-        for feat_name, feat_value in session_state.linguistic_features.items():
-            if _is_abnormal_feature(feat_name, feat_value, 'linguistic'):
-                abnormal_linguistic += 1
+        if isinstance(session_state.linguistic_features, dict):
+            linguistic_count = len(session_state.linguistic_features)
+            for feat_name, feat_value in session_state.linguistic_features.items():
+                # ✅ FIX: Only check if value is numeric
+                if isinstance(feat_value, (int, float, np.number)):
+                    try:
+                        if _is_abnormal_feature(feat_name, float(feat_value), 'linguistic'):
+                            abnormal_linguistic += 1
+                    except (TypeError, ValueError):
+                        pass
     
     return {
         'acoustic_feature_count': acoustic_count,
@@ -334,14 +592,113 @@ def _build_feature_summary(session_state: Any) -> Dict[str, Any]:
 
 
 def _build_detailed_analysis(session_state: Any) -> Dict[str, Any]:
-    """Build detailed analysis with all features"""
+    """Build detailed analysis with all features using enhanced FeatureAnalyzer"""
     acoustic_features = {}
     linguistic_features = {}
     
-    # Aggregate acoustic features (average across questions)
-    if hasattr(session_state, 'acoustic_features') and session_state.acoustic_features:
+    # ✅ NEW: Use enhanced FeatureAnalyzer if available
+    if feature_analyzer:
+        try:
+            # Get user info for gender-specific analysis
+            user_info = getattr(session_state, 'user_info', {}) or {}
+            gender = user_info.get('gender', 'male')
+            
+            # Get final features
+            final_acoustic = getattr(session_state, 'final_acoustic_features', {}) or {}
+            final_linguistic = getattr(session_state, 'final_linguistic_features', {}) or {}
+            
+            # If no final features, try to aggregate from per-question features
+            if not final_acoustic and hasattr(session_state, 'acoustic_features'):
+                logger.info("📊 Aggregating acoustic features for enhanced analysis")
+                all_acoustic = {}
+                for question_id, features in session_state.acoustic_features.items():
+                    if isinstance(features, dict):
+                        for key, value in features.items():
+                            if isinstance(value, (int, float, np.number)):
+                                if key not in all_acoustic:
+                                    all_acoustic[key] = []
+                                all_acoustic[key].append(float(value))
+                # Average
+                for key, values in all_acoustic.items():
+                    if values:
+                        final_acoustic[key] = float(np.mean(values))
+            
+            if not final_linguistic and hasattr(session_state, 'linguistic_features'):
+                final_linguistic = session_state.linguistic_features or {}
+            
+            # Analyze with enhanced analyzer
+            if final_acoustic or final_linguistic:
+                logger.info(f"🔬 Using enhanced FeatureAnalyzer: {len(final_acoustic)} acoustic, {len(final_linguistic)} linguistic")
+                analysis_result = feature_analyzer.analyze_all_features(
+                    final_acoustic,
+                    final_linguistic,
+                    {'gender': gender}
+                )
+                
+                # Convert to expected format
+                for feat in analysis_result['acoustic_analysis']['features']:
+                    acoustic_features[feat['key']] = {
+                        'value': feat['value'],
+                        'std': 0.0,
+                        'normal_range': feat.get('normal_range', {}).get('display', 'N/A'),
+                        'unit': feat.get('unit', ''),
+                        'is_abnormal': feat['severity'] not in ['normal', 'borderline'],
+                        'description': feat.get('name_vi', feat['key']),
+                        'severity': feat['severity'],
+                        'status': feat['status'],
+                        'interpretation': feat['interpretation'],
+                        'clinical_significance': feat.get('clinical_significance', ''),
+                        'deviation_pct': feat.get('deviation_pct', 0)
+                    }
+                
+                for feat in analysis_result['linguistic_analysis']['features']:
+                    linguistic_features[feat['key']] = {
+                        'value': feat['value'],
+                        'normal_range': feat.get('normal_range', {}).get('display', 'N/A'),
+                        'unit': feat.get('unit', ''),
+                        'is_abnormal': feat['severity'] not in ['normal', 'borderline'],
+                        'description': feat.get('name_vi', feat['key']),
+                        'severity': feat['severity'],
+                        'status': feat['status'],
+                        'interpretation': feat['interpretation'],
+                        'clinical_significance': feat.get('clinical_significance', ''),
+                        'deviation_pct': feat.get('deviation_pct', 0)
+                    }
+                
+                logger.info(f"✅ Enhanced analysis complete: {len(acoustic_features)} acoustic, {len(linguistic_features)} linguistic")
+                
+                # Return early if enhanced analysis succeeded
+                if acoustic_features or linguistic_features:
+                    return {
+                        'acoustic': acoustic_features,
+                        'linguistic': linguistic_features,
+                        'analysis_summary': analysis_result['summary']
+                    }
+        except Exception as e:
+            logger.warning(f"⚠️ Enhanced feature analysis failed, falling back to basic: {e}")
+    
+    # ✅ FALLBACK: Use original method if enhanced analyzer not available or failed
+    # ✅ FIX: Use final_acoustic_features if available (calculated at test completion)
+    if hasattr(session_state, 'final_acoustic_features') and session_state.final_acoustic_features:
+        logger.info(f"📊 Using final acoustic features: {len(session_state.final_acoustic_features)} features")
+        for key, value in session_state.final_acoustic_features.items():
+            if isinstance(value, (int, float, np.number)):
+                float_value = float(value)
+                acoustic_features[key] = {
+                    'value': float_value,
+                    'std': 0.0,  # Final features are already aggregated
+                    'normal_range': CLINICAL_THRESHOLDS['acoustic'].get(key, {}).get('normal', (0, 1)),
+                    'unit': CLINICAL_THRESHOLDS['acoustic'].get(key, {}).get('unit', ''),
+                    'is_abnormal': _is_abnormal_feature(key, float_value, 'acoustic'),
+                    'description': CLINICAL_THRESHOLDS['acoustic'].get(key, {}).get('description', '')
+                }
+        logger.info(f"✅ Processed {len(acoustic_features)} final acoustic features")
+    # Fallback: Aggregate acoustic features (average across questions)
+    elif hasattr(session_state, 'acoustic_features') and session_state.acoustic_features:
+        logger.info(f"📊 Aggregating acoustic features from {len(session_state.acoustic_features)} questions")
         all_acoustic = {}
         for question_id, features in session_state.acoustic_features.items():
+            logger.debug(f"  Question {question_id}: {len(features)} features")
             for key, value in features.items():
                 if key not in all_acoustic:
                     all_acoustic[key] = []
@@ -351,25 +708,47 @@ def _build_detailed_analysis(session_state: Any) -> Dict[str, Any]:
         # Average
         for key, values in all_acoustic.items():
             if values:
+                mean_value = float(np.mean(values))
                 acoustic_features[key] = {
-                    'value': float(np.mean(values)),
+                    'value': mean_value,
                     'std': float(np.std(values)) if len(values) > 1 else 0.0,
                     'normal_range': CLINICAL_THRESHOLDS['acoustic'].get(key, {}).get('normal', (0, 1)),
                     'unit': CLINICAL_THRESHOLDS['acoustic'].get(key, {}).get('unit', ''),
-                    'is_abnormal': _is_abnormal_feature(key, np.mean(values), 'acoustic'),
+                    'is_abnormal': _is_abnormal_feature(key, mean_value, 'acoustic'),
                     'description': CLINICAL_THRESHOLDS['acoustic'].get(key, {}).get('description', '')
                 }
+        logger.info(f"✅ Aggregated {len(acoustic_features)} acoustic features (avg from all questions)")
+    else:
+        logger.warning("⚠️ No acoustic features found in session_state!")
     
-    # Linguistic features
-    if hasattr(session_state, 'linguistic_features') and session_state.linguistic_features:
-        for key, value in session_state.linguistic_features.items():
+    # ✅ FIX: Use final_linguistic_features if available
+    if hasattr(session_state, 'final_linguistic_features') and session_state.final_linguistic_features:
+        logger.info(f"📝 Using final linguistic features: {len(session_state.final_linguistic_features)} features")
+        for key, value in session_state.final_linguistic_features.items():
+            float_value = float(value) if isinstance(value, (int, float, np.number)) else 0.0
             linguistic_features[key] = {
-                'value': float(value) if isinstance(value, (int, float, np.number)) else 0.0,
+                'value': float_value,
                 'normal_range': CLINICAL_THRESHOLDS['linguistic'].get(key, {}).get('normal', (0, 1)),
                 'unit': CLINICAL_THRESHOLDS['linguistic'].get(key, {}).get('unit', ''),
-                'is_abnormal': _is_abnormal_feature(key, value, 'linguistic'),
+                'is_abnormal': _is_abnormal_feature(key, float_value, 'linguistic'),
                 'description': CLINICAL_THRESHOLDS['linguistic'].get(key, {}).get('description', '')
             }
+        logger.info(f"✅ Processed {len(linguistic_features)} final linguistic features")
+    # Fallback: Use linguistic_features
+    elif hasattr(session_state, 'linguistic_features') and session_state.linguistic_features:
+        logger.info(f"📝 Processing {len(session_state.linguistic_features)} linguistic features")
+        for key, value in session_state.linguistic_features.items():
+            float_value = float(value) if isinstance(value, (int, float, np.number)) else 0.0
+            linguistic_features[key] = {
+                'value': float_value,
+                'normal_range': CLINICAL_THRESHOLDS['linguistic'].get(key, {}).get('normal', (0, 1)),
+                'unit': CLINICAL_THRESHOLDS['linguistic'].get(key, {}).get('unit', ''),
+                'is_abnormal': _is_abnormal_feature(key, float_value, 'linguistic'),
+                'description': CLINICAL_THRESHOLDS['linguistic'].get(key, {}).get('description', '')
+            }
+        logger.info(f"✅ Processed {len(linguistic_features)} linguistic features")
+    else:
+        logger.warning("⚠️ No linguistic features found in session_state!")
     
     return {
         'acoustic': acoustic_features,
@@ -377,8 +756,210 @@ def _build_detailed_analysis(session_state: Any) -> Dict[str, Any]:
     }
 
 
+def _build_multimodal_analysis(session_state: Any, detailed_analysis: Dict[str, Any]) -> Dict[str, Any]:
+    """Build multimodal analysis section with simplified feature values and risk scores"""
+    # Extract simple feature values from detailed_analysis
+    acoustic_features = {}
+    linguistic_features = {}
+    
+    # Extract acoustic feature values (just the values, not the full structure)
+    if 'acoustic' in detailed_analysis:
+        for key, feature_data in detailed_analysis['acoustic'].items():
+            if isinstance(feature_data, dict) and 'value' in feature_data:
+                acoustic_features[key] = feature_data['value']
+            elif isinstance(feature_data, (int, float)):
+                acoustic_features[key] = float(feature_data)
+    
+    # Extract linguistic feature values
+    if 'linguistic' in detailed_analysis:
+        for key, feature_data in detailed_analysis['linguistic'].items():
+            if isinstance(feature_data, dict) and 'value' in feature_data:
+                linguistic_features[key] = feature_data['value']
+            elif isinstance(feature_data, (int, float)):
+                linguistic_features[key] = float(feature_data)
+    
+    # Get risk scores from mci_result
+    combined_risk_score = 0.0
+    risk_level = 'on'
+    if hasattr(session_state, 'mci_result') and session_state.mci_result:
+        combined_risk_score = session_state.mci_result.get('combined_risk_score', 0.0)
+        risk_level = session_state.mci_result.get('risk_level', 'on')
+    
+    logger.info(f"✅ Built multimodal_analysis: {len(acoustic_features)} acoustic, {len(linguistic_features)} linguistic, risk={combined_risk_score:.3f}")
+    
+    return {
+        'acoustic_features': acoustic_features,
+        'linguistic_features': linguistic_features,
+        'combined_risk_score': float(combined_risk_score),
+        'risk_level': risk_level
+    }
+
+
 def _build_shap_explanation(session_state: Any, shap_explanations: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    """Build SHAP explanation section"""
+    """Build SHAP explanation section with clinical interpretation"""
+    
+    # ✅ NEW: Try enhanced SHAP explainer first
+    try:
+        from services.enhanced_shap_explainer import CognitiveDeclineSHAPExplainer
+        
+        # Get features from session state
+        final_acoustic = getattr(session_state, 'final_acoustic_features', {}) or {}
+        final_linguistic = getattr(session_state, 'final_linguistic_features', {}) or {}
+        
+        # If no final features, try to aggregate
+        if not final_acoustic and hasattr(session_state, 'acoustic_features'):
+            all_acoustic = {}
+            for question_id, features in session_state.acoustic_features.items():
+                if isinstance(features, dict):
+                    for key, value in features.items():
+                        if isinstance(value, (int, float, np.number)):
+                            if key not in all_acoustic:
+                                all_acoustic[key] = []
+                            all_acoustic[key].append(float(value))
+            # Average
+            for key, values in all_acoustic.items():
+                if values:
+                    final_acoustic[key] = float(np.mean(values))
+        
+        if not final_linguistic and hasattr(session_state, 'linguistic_features'):
+            final_linguistic = session_state.linguistic_features or {}
+        
+        # Combine all features
+        all_features = {**final_acoustic, **final_linguistic}
+        
+        if all_features:
+            logger.info(f"🔬 Using enhanced SHAP explainer: {len(all_features)} features")
+            enhanced_explainer = CognitiveDeclineSHAPExplainer(model_path=None)  # Use risk-based fallback
+            
+            user_info = getattr(session_state, 'user_info', {}) or {}
+            shap_result = enhanced_explainer.explain_prediction(all_features, user_info)
+            
+            if shap_result and 'shap_analysis' in shap_result:
+                # Format for frontend
+                risk_factors = shap_result['shap_analysis'].get('risk_factors', [])
+                protective_factors = shap_result['shap_analysis'].get('protective_factors', [])
+                
+                # Convert to expected format
+                formatted_risk = []
+                for factor in risk_factors[:10]:  # Top 10
+                    formatted_risk.append({
+                        'feature': factor.get('feature_key', ''),
+                        'feature_name_vi': factor.get('feature_name_vi', ''),
+                        'feature_name_en': factor.get('feature_name_en', ''),
+                        'shap_value': factor.get('shap_value', 0.0),
+                        'absolute_importance': factor.get('absolute_importance', 0.0),
+                        'value': factor.get('feature_value', 0.0),
+                        'unit': factor.get('unit', ''),
+                        'normal_range': factor.get('normal_range', {}).get('display', 'N/A'),
+                        'comparison': factor.get('comparison', 'N/A'),
+                        'interpretation': factor.get('interpretation', ''),
+                        'explanation_vi': factor.get('explanation', ''),
+                        'recommendation': factor.get('recommendation', ''),
+                        'citation': factor.get('citation', '')
+                    })
+                
+                formatted_protective = []
+                for factor in protective_factors[:10]:
+                    formatted_protective.append({
+                        'feature': factor.get('feature_key', ''),
+                        'feature_name_vi': factor.get('feature_name_vi', ''),
+                        'feature_name_en': factor.get('feature_name_en', ''),
+                        'shap_value': factor.get('shap_value', 0.0),
+                        'absolute_importance': abs(factor.get('shap_value', 0.0)),
+                        'value': factor.get('feature_value', 0.0),
+                        'unit': factor.get('unit', ''),
+                        'normal_range': factor.get('normal_range', {}).get('display', 'N/A'),
+                        'comparison': factor.get('comparison', 'N/A'),
+                        'interpretation': factor.get('interpretation', ''),
+                        'explanation_vi': factor.get('explanation', ''),
+                        'recommendation': factor.get('recommendation', ''),
+                        'citation': factor.get('citation', '')
+                    })
+                
+                # Get grouped contributions
+                grouped = {}
+                for factor in risk_factors + protective_factors:
+                    category = factor.get('category', 'Khác')
+                    if category not in grouped:
+                        grouped[category] = 0.0
+                    grouped[category] += abs(factor.get('shap_value', 0.0))
+                
+                logger.info(f"✅ Enhanced SHAP: {len(formatted_risk)} risk, {len(formatted_protective)} protective factors")
+                
+                return {
+                    'top_risk_factors': formatted_risk,
+                    'top_protective_factors': formatted_protective,
+                    'grouped_contributions': grouped,
+                    'total_contribution': sum(abs(f.get('shap_value', 0)) for f in risk_factors + protective_factors),
+                    'citation': 'Lundberg & Lee (2017) - SHAP',
+                    'methodology': 'Enhanced SHAP with clinical interpretation'
+                }
+    except ImportError as e:
+        logger.debug(f"Enhanced SHAP explainer not available: {e}")
+    except Exception as e:
+        logger.warning(f"⚠️ Enhanced SHAP failed, falling back: {e}", exc_info=True)
+    
+    # ✅ FALLBACK: Try to use clinical SHAP explanations if available
+    try:
+        from services.comprehensive_results_clinical_shap import generate_clinical_shap_explanations
+        
+        # Get features from detailed analysis
+        detailed_analysis = _build_detailed_analysis(session_state)
+        
+        # Extract acoustic and linguistic features
+        acoustic_features = {}
+        linguistic_features = {}
+        
+        if 'acoustic' in detailed_analysis:
+            for key, feature_data in detailed_analysis['acoustic'].items():
+                if isinstance(feature_data, dict) and 'value' in feature_data:
+                    acoustic_features[key] = feature_data['value']
+                elif isinstance(feature_data, (int, float)):
+                    acoustic_features[key] = float(feature_data)
+        
+        if 'linguistic' in detailed_analysis:
+            for key, feature_data in detailed_analysis['linguistic'].items():
+                if isinstance(feature_data, dict) and 'value' in feature_data:
+                    linguistic_features[key] = feature_data['value']
+                elif isinstance(feature_data, (int, float)):
+                    linguistic_features[key] = float(feature_data)
+        
+        # Get domain scores
+        domain_scores = session_state.domain_scores if hasattr(session_state, 'domain_scores') else {}
+        
+        # Get user info
+        user_info = session_state.user_info if hasattr(session_state, 'user_info') else {}
+        
+        # Get MMSE score
+        mmse_score = session_state.total_score if hasattr(session_state, 'total_score') else 0.0
+        
+        # Generate clinical SHAP explanations if we have features
+        if acoustic_features or linguistic_features:
+            logger.info("🔬 Using clinical SHAP explanations...")
+            clinical_shap = generate_clinical_shap_explanations(
+                mmse_score=float(mmse_score),
+                acoustic_features=acoustic_features,
+                linguistic_features=linguistic_features,
+                domain_scores=domain_scores,
+                user_info=user_info
+            )
+            
+            return {
+                'top_risk_factors': clinical_shap['summary'].get('top_risk_factors', []),
+                'top_protective_factors': clinical_shap['summary'].get('top_protective_factors', []),
+                'feature_contributions': clinical_shap.get('feature_contributions', {}),
+                'overall_interpretation': clinical_shap['summary'].get('overall_interpretation', ''),
+                'key_concerns': clinical_shap['summary'].get('key_concerns', []),
+                'strong_points': clinical_shap['summary'].get('strong_points', []),
+                'methodology': clinical_shap.get('methodology', 'SHAP'),
+                'citation': clinical_shap.get('citation', 'shap')
+            }
+    except ImportError as e:
+        logger.warning(f"⚠️ Clinical SHAP not available, using fallback: {e}")
+    except Exception as e:
+        logger.warning(f"⚠️ Clinical SHAP generation failed, using fallback: {e}")
+    
+    # Fallback to original method
     if not shap_explanations:
         # Generate from risk components if available
         shap_explanations = _generate_shap_from_risk_components(session_state)
@@ -428,28 +1009,74 @@ def _build_shap_explanation(session_state: Any, shap_explanations: Optional[Dict
     }
 
 
-def _build_recommendations(session_state: Any, shap_explanation: Dict[str, Any]) -> List[str]:
-    """Build evidence-based recommendations"""
+def _build_recommendations(session_state: Any, shap_explanation: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Build evidence-based, personalized recommendations with clinical interpretation"""
+    
+    # Try to use clinical recommendations if available
+    try:
+        from services.comprehensive_results_clinical_recommendations import generate_personalized_recommendations
+        
+        # Get SHAP feature contributions
+        shap_values = shap_explanation.get('feature_contributions', {})
+        
+        # Get user info and scores
+        user_info = session_state.user_info if hasattr(session_state, 'user_info') else {}
+        mmse_score = session_state.total_score if hasattr(session_state, 'total_score') else 0.0
+        risk_level = 'on'
+        
+        if hasattr(session_state, 'mci_result') and session_state.mci_result:
+            risk_level = session_state.mci_result.get('risk_level', 'on')
+        
+        # Generate personalized recommendations
+        if shap_values:
+            logger.info("🔬 Using clinical personalized recommendations...")
+            clinical_recommendations = generate_personalized_recommendations(
+                shap_values=shap_values,
+                mmse_score=float(mmse_score),
+                user_info=user_info,
+                risk_level=risk_level
+            )
+            return clinical_recommendations
+    except ImportError as e:
+        logger.warning(f"⚠️ Clinical recommendations not available, using fallback: {e}")
+    except Exception as e:
+        logger.warning(f"⚠️ Clinical recommendations generation failed, using fallback: {e}")
+    
+    # Fallback to original simple recommendations
     recommendations = []
     risk_level = 'on'
     
     if hasattr(session_state, 'mci_result') and session_state.mci_result:
         risk_level = session_state.mci_result.get('risk_level', 'on')
     
-    # General recommendations based on risk level
+    # Convert to dict format for consistency
     if risk_level == 'nguy_co_cao':
         recommendations.extend([
-            'Gặp bác sĩ chuyên khoa thần kinh để đánh giá chi tiết',
-            'Thực hiện các xét nghiệm chuyên sâu (MRI, PET scan nếu cần)',
-            'Theo dõi định kỳ mỗi 3-6 tháng',
-            'Tham gia các hoạt động kích thích nhận thức hàng ngày'
+            {
+                'category': 'medical',
+                'priority': 'high',
+                'title': 'Gặp bác sĩ chuyên khoa thần kinh',
+                'description': 'Đánh giá chi tiết cần thiết',
+                'actions': [
+                    'Thực hiện các xét nghiệm chuyên sâu (MRI, PET scan nếu cần)',
+                    'Theo dõi định kỳ mỗi 3-6 tháng',
+                    'Tham gia các hoạt động kích thích nhận thức hàng ngày'
+                ]
+            }
         ])
     elif risk_level == 'nguy_co_nhe':
         recommendations.extend([
-            'Tái đánh giá sau 6-12 tháng',
-            'Luyện tập từ vựng và kể chuyện hàng ngày',
-            'Tham gia các hoạt động xã hội và trí tuệ',
-            'Theo dõi các dấu hiệu suy giảm nhận thức'
+            {
+                'category': 'monitoring',
+                'priority': 'medium',
+                'title': 'Tái đánh giá và theo dõi',
+                'description': 'Theo dõi định kỳ',
+                'actions': [
+                    'Tái đánh giá sau 6-12 tháng',
+                    'Luyện tập từ vựng và kể chuyện hàng ngày',
+                    'Tham gia các hoạt động xã hội và trí tuệ'
+                ]
+            }
         ])
     else:
         recommendations.extend([
@@ -460,10 +1087,31 @@ def _build_recommendations(session_state: Any, shap_explanation: Dict[str, Any])
     
     # Feature-specific recommendations from SHAP
     for factor in shap_explanation.get('top_risk_factors', [])[:3]:
-        if 'recommendation' in factor:
-            recommendations.append(factor['recommendation'])
+        if isinstance(factor, dict) and 'recommendation' in factor:
+            rec = factor['recommendation']
+            # Only add if it's a string (not a dict)
+            if isinstance(rec, str):
+                recommendations.append(rec)
+            elif isinstance(rec, dict):
+                # If it's a dict, add it directly
+                recommendations.append(rec)
     
-    return list(set(recommendations))  # Remove duplicates
+    # ✅ FIX: Remove duplicates for strings, keep all dicts
+    seen_strings = set()
+    unique_recommendations = []
+    for rec in recommendations:
+        if isinstance(rec, str):
+            if rec not in seen_strings:
+                seen_strings.add(rec)
+                unique_recommendations.append(rec)
+        else:
+            # For dicts, check by converting to string representation
+            rec_str = json.dumps(rec, sort_keys=True) if isinstance(rec, dict) else str(rec)
+            if rec_str not in seen_strings:
+                seen_strings.add(rec_str)
+                unique_recommendations.append(rec)
+    
+    return unique_recommendations
 
 
 def _build_citations_list(session_state: Any, shap_explanation: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -646,12 +1294,40 @@ def _generate_shap_from_risk_components(session_state: Any) -> Optional[Dict[str
 
 def _interpret_score(raw_score: float, adjusted_score: float, risk_level: str, thresholds: Dict[str, Any]) -> str:
     """Generate score interpretation"""
+    # ✅ FIX: Handle None values for scores
+    raw_score = raw_score if raw_score is not None else 0.0
+    adjusted_score = adjusted_score if adjusted_score is not None else raw_score
+    
+    # ✅ FIX: Use actual score to determine range, not just risk_level
+    # Get thresholds
+    normal_min = thresholds.get('normal', {}).get('min') if thresholds.get('normal') else 24
+    mci_lower_min = thresholds.get('mci_lower', {}).get('min') if thresholds.get('mci_lower') else 20
+    mci_lower_max = thresholds.get('mci_lower', {}).get('max') if thresholds.get('mci_lower') else 23
+    dementia_max = thresholds.get('dementia', {}).get('max') if thresholds.get('dementia') else 19
+    
+    # Determine actual score range based on adjusted_score
+    score_to_check = adjusted_score if adjusted_score else raw_score
+    
     if risk_level == 'on':
-        return f"Điểm MMSE thô: {raw_score:.1f}/35. Sau điều chỉnh theo tuổi và học vấn: {adjusted_score:.1f}/35. Kết quả cho thấy chức năng nhận thức trong giới hạn bình thường (≥{thresholds['normal']['min']} điểm)."
+        normal_min_str = f"{normal_min}" if normal_min is not None else "24"
+        return f"Điểm MMSE thô: {raw_score:.1f}/35. Sau điều chỉnh theo tuổi và học vấn: {adjusted_score:.1f}/35. Kết quả cho thấy chức năng nhận thức trong giới hạn bình thường (≥{normal_min_str} điểm)."
     elif risk_level == 'nguy_co_nhe':
-        return f"Điểm MMSE thô: {raw_score:.1f}/35. Sau điều chỉnh: {adjusted_score:.1f}/35. Kết quả cho thấy dấu hiệu suy giảm nhận thức nhẹ (MCI), nằm trong khoảng {thresholds['mci_lower']['min']}-{thresholds['normal']['min']-1} điểm."
+        # ✅ FIX: Show actual score range based on score value, not just education threshold
+        if score_to_check < mci_lower_min:
+            # Score is below MCI threshold - this is actually dementia range
+            return f"Điểm MMSE thô: {raw_score:.1f}/35. Sau điều chỉnh: {adjusted_score:.1f}/35. Kết quả cho thấy dấu hiệu suy giảm nhận thức đáng kể (≤{dementia_max} điểm), cần đánh giá chuyên sâu ngay lập tức."
+        elif score_to_check >= mci_lower_min and score_to_check <= mci_lower_max:
+            # Score is in MCI range
+            return f"Điểm MMSE thô: {raw_score:.1f}/35. Sau điều chỉnh: {adjusted_score:.1f}/35. Kết quả cho thấy dấu hiệu suy giảm nhận thức nhẹ (MCI), nằm trong khoảng {mci_lower_min}-{mci_lower_max} điểm."
+        else:
+            # Score is between mci_lower_max and normal_min (borderline)
+            return f"Điểm MMSE thô: {raw_score:.1f}/35. Sau điều chỉnh: {adjusted_score:.1f}/35. Kết quả cho thấy dấu hiệu suy giảm nhận thức nhẹ (MCI), nằm trong khoảng {mci_lower_min}-{normal_min-1} điểm."
     else:
-        return f"Điểm MMSE thô: {raw_score:.1f}/35. Sau điều chỉnh: {adjusted_score:.1f}/35. Kết quả cho thấy dấu hiệu suy giảm nhận thức đáng kể (<{thresholds['mci_lower']['min']} điểm), cần đánh giá chuyên sâu."
+        # nguy_co_cao
+        if score_to_check <= dementia_max:
+            return f"Điểm MMSE thô: {raw_score:.1f}/35. Sau điều chỉnh: {adjusted_score:.1f}/35. Kết quả cho thấy dấu hiệu suy giảm nhận thức đáng kể (≤{dementia_max} điểm), cần đánh giá chuyên sâu ngay lập tức."
+        else:
+            return f"Điểm MMSE thô: {raw_score:.1f}/35. Sau điều chỉnh: {adjusted_score:.1f}/35. Kết quả cho thấy dấu hiệu suy giảm nhận thức đáng kể (<{mci_lower_min} điểm), cần đánh giá chuyên sâu."
 
 
 def _interpret_risk_level(risk_level: str) -> str:

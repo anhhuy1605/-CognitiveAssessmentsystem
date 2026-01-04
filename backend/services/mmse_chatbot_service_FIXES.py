@@ -138,3 +138,7 @@ def get_current_question(self, session_id: str) -> Tuple[str, Dict]:
 # next_question, metadata = self.get_current_question(session_id)
 # metadata['hidden_content'] = metadata.get('hidden_content', [])  # ✅ Ensure it's passed
 
+
+
+
+

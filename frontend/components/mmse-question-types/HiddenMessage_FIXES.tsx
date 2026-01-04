@@ -27,3 +27,7 @@ const processText = (text: string): string => {
 // TTS should use the original text with hidden content included
 // The parent component (ChatInterface) should pass full text to TTS
 
+
+
+
+

@@ -1,0 +1,27 @@
+================================================================================
+COMPREHENSIVE RESULTS SUMMARY
+================================================================================
+
+Session ID: test_comprehensive_1767406787
+Total Score: 27/35
+Risk Level: on
+Combined Risk: 0.300
+
+Sections in comprehensive_results:
+  - assessment_result
+  - feature_summary
+  - detailed_analysis
+  - multimodal_analysis
+  - shap_explanation
+  - recommendations
+  - citations
+  - clinical_interpretation
+  - metadata
+
+================================================================================
+MULTIMODAL ANALYSIS
+================================================================================
+Acoustic Features: 26
+Linguistic Features: 14
+Combined Risk Score: 0.3
+Risk Level: on

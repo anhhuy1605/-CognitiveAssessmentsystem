@@ -68,3 +68,7 @@ Sau khi tích hợp:
 - [ ] Không crash
 - [ ] UI mượt mà
 
+
+
+
+

@@ -626,7 +626,31 @@ export default function MMSEChatbotPage() {
   const handleUserInput = async (text: string, audioBlob?: Blob) => {
     // ✅ NEW FLOW: Text is required (already filled from transcription or manual input)
     // Audio is optional - can be included for additional backend processing
-    if (!session || !text.trim()) return;
+    if (!session) {
+      console.warn("⚠️ handleUserInput: No session");
+      return;
+    }
+    
+    // ✅ FIX: If we have audioBlob but no text, transcribe first
+    if (audioBlob && !text.trim()) {
+      console.log("🎤 handleUserInput: Audio blob provided but no text, transcribing...");
+      try {
+        await transcribeAudioOnly(audioBlob);
+        // After transcription, text will be in inputText state
+        // User can edit and submit manually, or we can auto-submit
+        // For now, let user edit and submit manually
+        return;
+      } catch (error: any) {
+        console.error("❌ handleUserInput: Transcription failed:", error);
+        alert(`Không thể transcribe audio: ${error.message || 'Unknown error'}. Vui lòng nhập câu trả lời bằng tay.`);
+        return;
+      }
+    }
+    
+    if (!text.trim()) {
+      console.warn("⚠️ handleUserInput: No text provided");
+      return;
+    }
     
     // ✅ Update current transcript for special interfaces
     setCurrentTranscript(text.trim());
@@ -984,7 +1008,7 @@ export default function MMSEChatbotPage() {
 
     setTimeout(() => {
       addBotMessage(session, 
-        `📊 **Tổng điểm MMSE của ${session.greeting}: ${session.totalScore}/30**\n\n` +
+        `📊 **Tổng điểm MMSE của ${session.greeting}: ${session.totalScore}/35**\n\n` +
         getScoreInterpretation(session.totalScore)
       );
     }, 1500);
@@ -1217,55 +1241,78 @@ export default function MMSEChatbotPage() {
   const transcribeAudioOnly = async (blob: Blob) => {
     setIsProcessing(true);
     try {
+      // ✅ FIX: Validate blob before sending
+      if (!blob || blob.size === 0) {
+        throw new Error("File audio rỗng hoặc không hợp lệ");
+      }
+
+      console.log(`🎤 Transcribing audio only (no submission)...`);
+      console.log(`   Blob size: ${(blob.size / 1024).toFixed(1)} KB, type: ${blob.type}`);
+
       const formData = new FormData();
-      formData.append("audio", blob, "recording.webm");
+      // ✅ FIX: Use proper filename based on blob type
+      const filename = blob.type.includes('webm') ? 'recording.webm' : 
+                      blob.type.includes('wav') ? 'recording.wav' :
+                      blob.type.includes('mp3') ? 'recording.mp3' : 'recording.audio';
+      formData.append("audio", blob, filename);
       formData.append("language", "vi");
       formData.append("use_vietnamese_asr", "true");
 
-      console.log(`🎤 Transcribing audio only (no submission)...`);
-
       // Try auto-transcribe endpoint first
       let response: Response | null = null;
+      let lastError: any = null;
+      
       try {
+        console.log(`📤 Trying /auto-transcribe endpoint...`);
         response = await fetch(`${API_BASE_URL}/auto-transcribe`, {
           method: "POST",
           body: formData,
           signal: AbortSignal.timeout(30000) // 30 second timeout
         });
+        console.log(`✅ /auto-transcribe response: ${response.status} ${response.statusText}`);
       } catch (fetchError: any) {
-        console.warn("Auto-transcribe endpoint failed, trying /api/transcribe:", fetchError);
+        lastError = fetchError;
+        console.warn("⚠️ Auto-transcribe endpoint failed:", fetchError);
         // Fallback to /api/transcribe
         try {
+          console.log(`📤 Trying /api/transcribe endpoint...`);
           response = await fetch(`${API_BASE_URL}/api/transcribe`, {
             method: "POST",
             body: formData,
             signal: AbortSignal.timeout(30000)
           });
+          console.log(`✅ /api/transcribe response: ${response.status} ${response.statusText}`);
         } catch (fallbackError: any) {
-          console.error("Both transcription endpoints failed:", fallbackError);
+          lastError = fallbackError;
+          console.error("❌ Both transcription endpoints failed:", fallbackError);
           if (fallbackError.name === 'AbortError') {
-            alert("Request timeout. Backend có thể đang quá tải hoặc không phản hồi.");
-            return;
+            throw new Error("Request timeout. Backend có thể đang quá tải hoặc không phản hồi.");
           }
-          alert(`Không thể kết nối đến server. Vui lòng thử lại.`);
-          return;
+          throw new Error(`Không thể kết nối đến server tại ${API_BASE_URL}. Vui lòng kiểm tra xem backend đã chạy chưa.`);
         }
       }
 
       if (!response) {
-        alert("Không thể transcribe audio. Vui lòng thử lại.");
-        return;
+        throw new Error("Không thể transcribe audio. Không có phản hồi từ server.");
       }
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error(`Transcription failed: ${response.status} - ${errorText}`);
-        alert(`Lỗi transcription (${response.status}). Vui lòng thử lại.`);
-        return;
+        console.error(`❌ Transcription failed: ${response.status} ${response.statusText} - ${errorText}`);
+        let errorMessage = `Lỗi transcription (${response.status})`;
+        try {
+          const errorData = JSON.parse(errorText);
+          errorMessage = errorData.error || errorData.message || errorMessage;
+        } catch {
+          errorMessage = errorText || errorMessage;
+        }
+        throw new Error(errorMessage);
       }
 
       const data = await response.json();
-      const transcript = data.transcript || data.transcription?.transcript || data.text || "";
+      console.log(`📝 Transcription response:`, data);
+      
+      const transcript = data.transcript || data.transcription?.transcript || data.text || data.data?.transcript || "";
 
       if (transcript.trim()) {
         // ✅ Show transcript in input box for editing
@@ -1273,13 +1320,15 @@ export default function MMSEChatbotPage() {
         console.log(`✅ Transcript ready for editing: "${transcript}"`);
         // Audio blob is already set, user can edit and submit
       } else {
-        console.warn("⚠️ Empty transcript received");
+        console.warn("⚠️ Empty transcript received from server");
         setInputText("");
-        alert("Không thể transcribe audio. Vui lòng thử lại hoặc nhập câu trả lời bằng tay.");
+        throw new Error("Không thể transcribe audio. Server trả về kết quả rỗng. Vui lòng thử lại hoặc nhập câu trả lời bằng tay.");
       }
     } catch (error: any) {
-      console.error("Error transcribing audio:", error);
-      alert(`Lỗi khi transcribe: ${error.message || "Unknown error"}`);
+      console.error("❌ Error transcribing audio:", error);
+      const errorMessage = error.message || "Unknown error";
+      alert(`Lỗi khi transcribe: ${errorMessage}`);
+      throw error; // Re-throw to be caught by caller
     } finally {
       setIsProcessing(false);
     }
@@ -1287,14 +1336,25 @@ export default function MMSEChatbotPage() {
 
   // Handle file upload
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    console.log("📁 handleFileUpload called", e.target.files);
+    
     const file = e.target.files?.[0];
-    if (!file) return;
+    if (!file) {
+      console.warn("⚠️ No file selected");
+      return;
+    }
+
+    console.log(`📄 File selected: ${file.name}, size: ${(file.size / 1024).toFixed(1)} KB, type: ${file.type || 'unknown'}`);
+
+    // ✅ IMMEDIATE FEEDBACK: Show processing indicator
+    setIsProcessing(true);
 
     // Validate file type
     const validTypes = ['audio/wav', 'audio/mp3', 'audio/mpeg', 'audio/webm', 'audio/ogg', 'audio/m4a', 'audio/x-m4a'];
     const isValidType = validTypes.includes(file.type) || file.name.match(/\.(wav|mp3|webm|ogg|m4a)$/i);
     
     if (!isValidType) {
+      setIsProcessing(false);
       alert('Vui lòng chọn file audio hợp lệ (WAV, MP3, WebM, OGG, M4A)');
       return;
     }
@@ -1302,33 +1362,78 @@ export default function MMSEChatbotPage() {
     // Validate file size (max 10MB)
     const maxSize = 10 * 1024 * 1024; // 10MB
     if (file.size > maxSize) {
+      setIsProcessing(false);
       alert('File quá lớn. Vui lòng chọn file nhỏ hơn 10MB');
       return;
     }
 
+    console.log("✅ File validation passed, starting FileReader...");
+
     // ✅ TRANSCRIBE ONLY: Convert File to Blob and transcribe
     const reader = new FileReader();
-    reader.onload = async (event) => {
-      if (event.target?.result) {
-        const blob = new Blob([event.target.result], { type: file.type });
-        setCurrentAudioBlob(blob);
-        
-        // ✅ TRANSCRIBE ONLY: Transcribe audio and show in input box for editing
-        // User can edit transcript before submitting
-        if (session) {
-          try {
-            console.log(`✅ File uploaded: ${file.name} (${(file.size / 1024).toFixed(1)} KB). Transcribing...`);
-            await transcribeAudioOnly(blob);
-          } catch (error) {
-            console.error("Error in transcription:", error);
-            // Error is already handled in transcribeAudioOnly, just prevent unhandled rejection
-          }
-        }
+    
+    reader.onloadstart = () => {
+      console.log("📖 FileReader: onloadstart - Starting to read file...");
+    };
+    
+    reader.onprogress = (event) => {
+      if (event.lengthComputable) {
+        const percentLoaded = Math.round((event.loaded / event.total) * 100);
+        console.log(`📖 FileReader: onprogress - ${percentLoaded}% loaded`);
       }
     };
-    reader.onerror = () => {
+    
+    reader.onload = async (event) => {
+      console.log("📖 FileReader: onload - File read complete");
+      if (event.target?.result) {
+        try {
+          // ✅ FIX: Use the file directly or create blob with proper type
+          const blob = file instanceof Blob ? file : new Blob([event.target.result], { type: file.type || 'audio/webm' });
+          setCurrentAudioBlob(blob);
+          
+          console.log(`✅ File uploaded: ${file.name} (${(file.size / 1024).toFixed(1)} KB, type: ${file.type || 'unknown'})`);
+          console.log(`   Blob created: size=${blob.size} bytes, type=${blob.type}`);
+          
+          // ✅ TRANSCRIBE ONLY: Transcribe audio and show in input box for editing
+          // User can edit transcript before submitting
+          // Note: Transcription doesn't require a session, but submission does
+          try {
+            console.log(`🎤 Starting transcription...`);
+            await transcribeAudioOnly(blob);
+          } catch (error: any) {
+            console.error("❌ Error in transcription:", error);
+            setIsProcessing(false);
+            alert(`Lỗi khi transcribe: ${error.message || 'Unknown error'}. Vui lòng thử lại hoặc nhập câu trả lời bằng tay.`);
+          }
+        } catch (error: any) {
+          console.error("❌ Error processing file:", error);
+          setIsProcessing(false);
+          alert(`Lỗi khi xử lý file: ${error.message || 'Unknown error'}`);
+        }
+      } else {
+        console.error("❌ FileReader result is null");
+        setIsProcessing(false);
+        alert('Không thể đọc file. Vui lòng thử lại.');
+      }
+    };
+    
+    reader.onerror = (error) => {
+      console.error("❌ FileReader error:", error);
+      setIsProcessing(false);
       alert('Lỗi khi đọc file. Vui lòng thử lại.');
     };
+    
+    reader.onabort = () => {
+      console.warn("⚠️ FileReader aborted");
+      setIsProcessing(false);
+      alert('Đọc file bị hủy. Vui lòng thử lại.');
+    };
+    
+    reader.onloadend = () => {
+      console.log("📖 FileReader: onloadend - File reading finished");
+    };
+    
+    console.log("📖 Starting FileReader.readAsArrayBuffer...");
     reader.readAsArrayBuffer(file);
 
     // Reset input
@@ -1738,7 +1843,7 @@ export default function MMSEChatbotPage() {
                   {/* ✅ Score Display (separate from progress) */}
                   <div className="text-right">
                     <div className="text-2xl font-bold text-blue-600">
-                      {session.totalScore}/30
+                      {session.totalScore}/35
                     </div>
                     <div className="text-xs text-gray-500">điểm</div>
                   </div>
@@ -1752,14 +1857,14 @@ export default function MMSEChatbotPage() {
                       initial={{ width: 0 }}
                       animate={{ 
                         width: `${session.messages.filter(m => m.type === "user").length > 0 
-                          ? (session.messages.filter(m => m.type === "user").length / 30) * 100 
+                          ? (session.messages.filter(m => m.type === "user").length / 28) * 100 
                           : 0}%` 
                       }}
                       transition={{ duration: 0.5, ease: "easeOut" }}
                     />
                   </div>
                   <span className="text-sm text-gray-600 font-medium min-w-[60px] text-right">
-                    {session.messages.filter(m => m.type === "user").length}/30 câu
+                    {session.messages.filter(m => m.type === "user").length}/28 câu
                   </span>
                 </div>
                 
