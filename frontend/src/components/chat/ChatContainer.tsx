@@ -40,19 +40,19 @@ export default function ChatContainer({
 }: ChatContainerProps) {
   const [inputText, setInputText] = useState('');
 
-  const handleSend = useCallback(async (text: string) => {
-    if (!text.trim()) return;
+  const handleSend = useCallback(async (text: string, audioBlob?: Blob, metadata?: Record<string, any>) => {
+    if (!text.trim() && !audioBlob && !metadata) return;
 
     // Get current audio blob if recording
-    let audioBlob: Blob | undefined;
-    if (isRecording) {
+    let currentAudioBlob: Blob | undefined = audioBlob;
+    if (isRecording && !audioBlob) {
       // Stop recording and get blob
       onStopRecording();
       // Note: In real implementation, you'd get the blob from useVoice hook
       // For now, we'll send text only
     }
 
-    await onSendMessage(text, audioBlob);
+    await onSendMessage(text || '', currentAudioBlob, metadata);
     setInputText('');
   }, [isRecording, onSendMessage, onStopRecording]);
 

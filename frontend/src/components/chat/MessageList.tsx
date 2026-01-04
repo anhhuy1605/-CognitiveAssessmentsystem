@@ -16,7 +16,7 @@ interface MessageListProps {
   currentTranscript?: string;
   isRecording?: boolean;
   onStopRecording?: () => void;
-  onSendMessage?: (text: string) => void;
+  onSendMessage?: (text: string, audioBlob?: Blob, metadata?: Record<string, any>) => void | Promise<void>;
   elderlyFriendly?: boolean;
 }
 
