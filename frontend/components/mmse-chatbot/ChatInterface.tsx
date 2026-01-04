@@ -366,7 +366,7 @@ export default function ChatInterface({
                         {message.actionButtons.map((button, idx) => (
                           <Button
                             key={idx}
-                            variant={button.variant === "primary" ? "default" : "outline"}
+                            variant={button.variant === "primary" ? "default" : button.variant === "secondary" ? "secondaryOutline" : "default"}
                             size={buttonSize}
                             onClick={() => {
                               // Handle action button click
