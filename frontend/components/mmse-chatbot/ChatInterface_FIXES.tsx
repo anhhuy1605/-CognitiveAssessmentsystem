@@ -1,10 +1,13 @@
 // FIXES for ChatInterface.tsx
 // ============================
 // Ensure TTS reads hidden content and ClockDrawingModal is rendered
+//
+// NOTE: This is a reference/documentation file showing code patterns.
+// These code snippets are examples and should be integrated into the main ChatInterface.tsx file.
 
 // ✅ FIX 1: In message rendering, use ttsText for TTS
 // Update the message bubble rendering:
-
+/*
 {message.type === "bot" && (
     <div className="message-bubble">
         {/* Visible text with hidden content hidden */}
@@ -72,8 +75,11 @@
         )}
     </div>
 )}
+*/
 
 // ✅ FIX 2: Auto-speak when message arrives (use ttsText)
+// Example useEffect hook - integrate into your component:
+/*
 useEffect(() => {
     if (messages.length > 0 && voiceEnabled) {
         const lastMessage = messages[messages.length - 1];
@@ -84,6 +90,10 @@ useEffect(() => {
         }
     }
 }, [messages, voiceEnabled]);
+*/
+
+// Export empty object to make this a valid module
+export {};
 
 
 
