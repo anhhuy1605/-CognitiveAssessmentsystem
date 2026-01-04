@@ -335,7 +335,7 @@ export default function ClockDrawingModal({
               </label>
               <div className="flex items-center gap-2">
                 <Button
-                  variant="outline"
+                  variant="secondaryOutline"
                   size={elderlyFriendly ? "lg" : "default"}
                   onClick={() => updateBrushSize(-1)}
                   disabled={brushSize <= 1}
@@ -346,7 +346,7 @@ export default function ClockDrawingModal({
                   {brushSize}px
                 </span>
                 <Button
-                  variant="outline"
+                  variant="secondaryOutline"
                   size={elderlyFriendly ? "lg" : "default"}
                   onClick={() => updateBrushSize(1)}
                   disabled={brushSize >= 20}
