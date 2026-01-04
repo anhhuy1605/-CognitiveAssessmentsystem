@@ -145,7 +145,7 @@ export default function ChatInput({
         {/* Record Button */}
         <Button
           type="button"
-          variant={isRecording ? 'destructive' : 'outline'}
+          variant={isRecording ? 'danger' : 'secondaryOutline'}
           size={elderlyFriendly ? 'lg' : 'default'}
           onClick={handleRecordingClick}
           disabled={isProcessing}
