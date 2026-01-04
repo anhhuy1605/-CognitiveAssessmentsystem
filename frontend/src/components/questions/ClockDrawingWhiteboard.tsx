@@ -261,7 +261,7 @@ export default function ClockDrawingWhiteboard({
         
         {/* Tools */}
         <Button
-          variant="outline"
+          variant="secondaryOutline"
           size={elderlyFriendly ? "lg" : "default"}
           onClick={handleClear}
           className="gap-2"
@@ -271,7 +271,7 @@ export default function ClockDrawingWhiteboard({
         </Button>
         
         <Button
-          variant="outline"
+          variant="secondaryOutline"
           size={elderlyFriendly ? "lg" : "default"}
           onClick={handleUndo}
           disabled={historyIndex <= 0}
@@ -282,7 +282,7 @@ export default function ClockDrawingWhiteboard({
         </Button>
         
         <Button
-          variant="outline"
+          variant="secondaryOutline"
           size={elderlyFriendly ? "lg" : "default"}
           onClick={handleRedo}
           disabled={historyIndex >= history.length - 1}
@@ -295,7 +295,7 @@ export default function ClockDrawingWhiteboard({
         {/* Submit/Cancel */}
         <div className="flex gap-2 ml-auto">
           <Button
-            variant="outline"
+            variant="secondaryOutline"
             size={elderlyFriendly ? "lg" : "default"}
             onClick={onCancel}
             className="gap-2"

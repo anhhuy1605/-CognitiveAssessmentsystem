@@ -92,7 +92,7 @@ export default function ChatInput({
         {/* File Upload Button */}
         <Button
           type="button"
-          variant="outline"
+          variant="secondaryOutline"
           size={elderlyFriendly ? 'lg' : 'default'}
           onClick={() => fileInputRef.current?.click()}
           disabled={isProcessing || isRecording}
@@ -129,7 +129,7 @@ export default function ChatInput({
         {/* Voice Toggle */}
         <Button
           type="button"
-          variant="outline"
+          variant="secondaryOutline"
           size={elderlyFriendly ? 'lg' : 'default'}
           onClick={onToggleVoice}
           className="flex-shrink-0"

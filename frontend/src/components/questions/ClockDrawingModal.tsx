@@ -335,7 +335,7 @@ export default function ClockDrawingModal({
               </label>
               <div className="flex items-center gap-2">
                 <Button
-                  variant="outline"
+                  variant="secondaryOutline"
                   size={elderlyFriendly ? "lg" : "default"}
                   onClick={() => updateBrushSize(-1)}
                   disabled={brushSize <= 1}
@@ -346,7 +346,7 @@ export default function ClockDrawingModal({
                   {brushSize}px
                 </span>
                 <Button
-                  variant="outline"
+                  variant="secondaryOutline"
                   size={elderlyFriendly ? "lg" : "default"}
                   onClick={() => updateBrushSize(1)}
                   disabled={brushSize >= 20}
@@ -359,7 +359,7 @@ export default function ClockDrawingModal({
             {/* Tools */}
             <div className="flex flex-wrap gap-2">
               <Button
-                variant="outline"
+                variant="secondaryOutline"
                 size={elderlyFriendly ? "lg" : "default"}
                 onClick={handleClear}
                 className="gap-2"
@@ -369,7 +369,7 @@ export default function ClockDrawingModal({
               </Button>
               
               <Button
-                variant="outline"
+                variant="secondaryOutline"
                 size={elderlyFriendly ? "lg" : "default"}
                 onClick={handleUndo}
                 disabled={historyIndex <= 0}
@@ -380,7 +380,7 @@ export default function ClockDrawingModal({
               </Button>
               
               <Button
-                variant="outline"
+                variant="secondaryOutline"
                 size={elderlyFriendly ? "lg" : "default"}
                 onClick={handleRedo}
                 disabled={historyIndex >= history.length - 1}
@@ -395,7 +395,7 @@ export default function ClockDrawingModal({
         
         <DialogFooter>
           <Button
-            variant="outline"
+            variant="secondaryOutline"
             size={elderlyFriendly ? "lg" : "default"}
             onClick={onClose}
             className="gap-2"

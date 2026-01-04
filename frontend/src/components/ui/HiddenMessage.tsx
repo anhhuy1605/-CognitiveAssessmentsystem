@@ -88,7 +88,7 @@ export default function HiddenMessage({
       {showRevealButton && !localRevealed && (
         <div className="mt-3">
           <Button
-            variant="outline"
+            variant="secondaryOutline"
             size={elderlyFriendly ? 'lg' : 'default'}
             onClick={handleReveal}
             className="w-full sm:w-auto"
