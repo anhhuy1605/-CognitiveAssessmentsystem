@@ -16,6 +16,8 @@ import { requiresSpecialInterface } from '@/components/mmse-question-types/Quest
 
 interface ChatInterfaceWithTrackerProps {
   messages: ChatMessage[];
+  inputText: string;
+  onInputChange: (text: string) => void;
   currentTranscript?: string;
   isRecording: boolean;
   isProcessing: boolean;

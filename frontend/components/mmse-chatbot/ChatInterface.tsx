@@ -63,7 +63,7 @@ interface ChatInterfaceProps {
   /**
    * Callback when user submits message
    */
-  onSendMessage: (text: string, audioBlob?: Blob) => void;
+  onSendMessage: (text: string, audioBlob?: Blob, metadata?: any) => void;
   
   /**
    * Whether recording is active
