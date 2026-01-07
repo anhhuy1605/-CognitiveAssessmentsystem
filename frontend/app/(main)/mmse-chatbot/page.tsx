@@ -11,6 +11,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import QuestionTypeRenderer, { requiresSpecialInterface } from "@/components/mmse-question-types/QuestionTypeRenderer";
+import ChatInterface, { ChatMessage } from "@/components/mmse-chatbot/ChatInterface";
+import HiddenMessage from "@/components/mmse-question-types/HiddenMessage";
 
 // ============================================
 // TYPES
@@ -39,6 +42,9 @@ interface Message {
   isRevealed?: boolean;
   domain?: string;
   questionId?: string;
+  questionCategory?: string; // ✅ ADD: For special interfaces
+  displayMode?: string; // ✅ ADD: For special interfaces
+  ttsText?: string; // ✅ FIX: Full text for TTS (includes hidden content)
   score?: {
     points_earned: number;
     points_possible: number;
@@ -194,6 +200,10 @@ export default function MMSEChatbotPage() {
     is_correct: boolean;
     feedback?: string;
   } | null>(null);
+  
+  // ✅ SPECIAL INTERFACES: Track current transcript for question-specific components
+  const [currentTranscript, setCurrentTranscript] = useState<string>("");
+  const [activeQuestionId, setActiveQuestionId] = useState<string | null>(null);
   
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -453,11 +463,6 @@ export default function MMSEChatbotPage() {
                   label: "✅ Có, tôi sẵn sàng",
                   action: "ready",
                   variant: "primary"
-                },
-                {
-                  label: "⏸️ Chờ một chút",
-                  action: "wait",
-                  variant: "secondary"
                 }
               ]
             }
@@ -470,22 +475,26 @@ export default function MMSEChatbotPage() {
   const addBotMessage = (currentSession: SessionState, content: string, options?: Partial<Message>) => {
     const processedContent = content.replace(/{greeting}/g, currentSession.greeting);
     
+    // ✅ FIX: Get tts_text from options if available (from backend metadata)
+    const ttsText = (options as any)?.ttsText || (options as any)?.tts_text || processedContent;
+    
     const newMessage: Message = {
       id: `bot_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
       type: "bot",
       content: processedContent,
       timestamp: new Date(),
-      ...options
+      ...options,
+      ttsText: ttsText
     };
 
     setSession(prev => {
       if (!prev) return prev;
       return { ...prev, messages: [...prev.messages, newMessage] };
     });
-
-    // Speak message if voice enabled
+    
+    // ✅ FIX: Use ttsText for TTS (includes hidden content)
     if (voiceEnabled) {
-      speakText(processedContent);
+      speakText(ttsText);
     }
   };
 
@@ -525,10 +534,6 @@ export default function MMSEChatbotPage() {
       // User is ready, start the test
       const responseText = "Có, tôi sẵn sàng";
       await handleUserInput(responseText);
-    } else if (action === "wait") {
-      // User wants to wait
-      const greeting = session.greeting || "bạn";
-      addBotMessage(session, `Không sao cả, ${greeting} cứ từ từ. Khi nào ${greeting} sẵn sàng, hãy cho tôi biết nhé!`);
     }
   };
 
@@ -614,13 +619,18 @@ export default function MMSEChatbotPage() {
   };
 
   const handleUserInput = async (text: string, audioBlob?: Blob) => {
+    // ✅ NEW FLOW: Text is required (already filled from transcription or manual input)
+    // Audio is optional - can be included for additional backend processing
     if (!session || !text.trim()) return;
+    
+    // ✅ Update current transcript for special interfaces
+    setCurrentTranscript(text.trim());
     
     // Add user message and reveal hidden content in one update
     const userMessage: Message = {
       id: `user_${Date.now()}`,
       type: "user",
-      content: text,
+      content: text.trim(),
       timestamp: new Date(),
       audioUrl: audioBlob ? URL.createObjectURL(audioBlob) : undefined
     };
@@ -662,17 +672,58 @@ export default function MMSEChatbotPage() {
       if (response.ok) {
         const data = await response.json();
         
+        // ✅ NEW FLOW: Transcript is already set from transcribeAudioOnly before submission
+        // No need to update input text from backend response - input should stay cleared
+        // Backend response transcript is only for logging/debugging, not for UI
+        
+        // ✅ FIX: Check completion FIRST before processing message
+        if (data.test_complete || data.metadata?.completed || data.metadata?.test_complete) {
+          // Test is complete - don't add any more questions
+          if (data.final_score) {
+            const finalMessage = `🎉 Hoàn thành! Điểm tổng: ${data.final_score.total}/${data.final_score.max} (${data.final_score.percentage}%)`;
+            addBotMessage(session, finalMessage);
+          }
+          
+          // Update final score if available
+          if (data.final_score?.total !== undefined) {
+            setSession(prev => {
+              if (!prev) return prev;
+              return {
+                ...prev,
+                totalScore: data.final_score.total
+              };
+            });
+          }
+          
+          completeTest(data);
+          return; // ✅ FIX: Stop processing - test is complete
+        }
+        
         // ✅ FIX: Backend returns the next question directly in data.message
         // We should use that instead of calling askNextQuestion() to avoid duplication
         if (data.message) {
           const messageText = data.message.trim();
           
-          // Check if this is a question (backend always returns next question)
-          // Add it as bot message
-          addBotMessage(session, messageText, {
-            domain: data.metadata?.domain,
-            questionId: data.metadata?.question_id
-          });
+          // Check if message is a completion/feedback message
+          const isCompletionMessage = messageText.includes('hoàn thành') || 
+                                     messageText.includes('kết thúc');
+          const isFeedbackMessage = messageText.includes('cảm ơn') && data.metadata?.verbal_fluency_completed;
+          
+          if (!isCompletionMessage) {
+            // Add it as bot message (question or feedback)
+            addBotMessage(session, messageText, {
+              domain: data.metadata?.domain,
+              questionId: data.metadata?.question_id,
+              questionCategory: data.metadata?.category || data.metadata?.question_category, // ✅ FIX: Map category to questionCategory
+              displayMode: data.metadata?.display_mode
+            });
+            
+            // If it's a feedback message (like Verbal Fluency completion), advance to next question
+            if (isFeedbackMessage && data.metadata?.verbal_fluency_completed) {
+              // Backend already advanced, so we don't need to do anything
+              // The next question will come in the next submission
+            }
+          }
           
           // ✅ FIX: Update session state to match backend
           if (data.metadata) {
@@ -722,15 +773,6 @@ export default function MMSEChatbotPage() {
         // Update domain scores if available
         if (data.score_update) {
           updateScore(data.score_update.domain, data.score_update.points);
-        }
-        
-        // Check if test complete
-        if (data.test_complete) {
-          if (data.final_score) {
-            const finalMessage = `🎉 Hoàn thành! Điểm tổng: ${data.final_score.total}/${data.final_score.max} (${data.final_score.percentage}%)`;
-            addBotMessage(session, finalMessage);
-          }
-          completeTest(data);
         }
       } else {
         // Fallback: process locally
@@ -889,9 +931,16 @@ export default function MMSEChatbotPage() {
     addBotMessage(session, currentQ.chatbot_message, {
       domain: currentDomain.domain_code,
       questionId: currentQ.question_id,
+      questionCategory: currentQ.question_category, // ✅ ADD: For special interfaces
+      displayMode: currentQ.display_mode, // ✅ ADD: For special interfaces
       hiddenContent: currentQ.display_mode === "hidden_until_response" ? currentQ.hidden_content : undefined,
       isRevealed: false
     });
+    
+    // ✅ Set active question for special interfaces
+    if (requiresSpecialInterface(currentQ.question_id, currentQ.question_category)) {
+      setActiveQuestionId(currentQ.question_id);
+    }
   };
 
   const completeTest = async (data: any) => {
@@ -920,7 +969,7 @@ export default function MMSEChatbotPage() {
 
     setTimeout(() => {
       addBotMessage(session, 
-        `📊 **Tổng điểm MMSE của ${session.greeting}: ${session.totalScore}/30**\n\n` +
+        `📊 **Tổng điểm MMSE của ${session.greeting}: ${session.totalScore}/35**\n\n` +
         getScoreInterpretation(session.totalScore)
       );
     }, 1500);
@@ -1100,13 +1149,21 @@ export default function MMSEChatbotPage() {
         if (e.data.size > 0) chunksRef.current.push(e.data);
       };
 
-      mediaRecorder.onstop = () => {
+      mediaRecorder.onstop = async () => {
         const blob = new Blob(chunksRef.current, { type: mediaRecorder.mimeType });
         setCurrentAudioBlob(blob);
         stream.getTracks().forEach(track => track.stop());
         
-        // Auto-transcribe
-        transcribeAudio(blob);
+        // ✅ TRANSCRIBE ONLY: Transcribe audio and show in input box for editing
+        // User can edit transcript before submitting
+        if (session) {
+          try {
+            await transcribeAudioOnly(blob);
+          } catch (error) {
+            console.error("Error in transcription:", error);
+            // Error is already handled in transcribeAudioOnly, just prevent unhandled rejection
+          }
+        }
       };
 
       // ✅ FIX: Start recording with smaller chunks for better quality
@@ -1141,6 +1198,78 @@ export default function MMSEChatbotPage() {
     setIsRecording(false);
   };
 
+  // ✅ NEW: Transcribe audio only (no submission) - show transcript in input for editing
+  const transcribeAudioOnly = async (blob: Blob) => {
+    setIsProcessing(true);
+    try {
+      const formData = new FormData();
+      formData.append("audio", blob, "recording.webm");
+      formData.append("language", "vi");
+      formData.append("use_vietnamese_asr", "true");
+
+      console.log(`🎤 Transcribing audio only (no submission)...`);
+
+      // Try auto-transcribe endpoint first
+      let response: Response | null = null;
+      try {
+        response = await fetch(`${API_BASE_URL}/auto-transcribe`, {
+          method: "POST",
+          body: formData,
+          signal: AbortSignal.timeout(30000) // 30 second timeout
+        });
+      } catch (fetchError: any) {
+        console.warn("Auto-transcribe endpoint failed, trying /api/transcribe:", fetchError);
+        // Fallback to /api/transcribe
+        try {
+          response = await fetch(`${API_BASE_URL}/api/transcribe`, {
+            method: "POST",
+            body: formData,
+            signal: AbortSignal.timeout(30000)
+          });
+        } catch (fallbackError: any) {
+          console.error("Both transcription endpoints failed:", fallbackError);
+          if (fallbackError.name === 'AbortError') {
+            alert("Request timeout. Backend có thể đang quá tải hoặc không phản hồi.");
+            return;
+          }
+          alert(`Không thể kết nối đến server. Vui lòng thử lại.`);
+          return;
+        }
+      }
+
+      if (!response) {
+        alert("Không thể transcribe audio. Vui lòng thử lại.");
+        return;
+      }
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`Transcription failed: ${response.status} - ${errorText}`);
+        alert(`Lỗi transcription (${response.status}). Vui lòng thử lại.`);
+        return;
+      }
+
+      const data = await response.json();
+      const transcript = data.transcript || data.transcription?.transcript || data.text || "";
+
+      if (transcript.trim()) {
+        // ✅ Show transcript in input box for editing
+        setInputText(transcript);
+        console.log(`✅ Transcript ready for editing: "${transcript}"`);
+        // Audio blob is already set, user can edit and submit
+      } else {
+        console.warn("⚠️ Empty transcript received");
+        setInputText("");
+        alert("Không thể transcribe audio. Vui lòng thử lại hoặc nhập câu trả lời bằng tay.");
+      }
+    } catch (error: any) {
+      console.error("Error transcribing audio:", error);
+      alert(`Lỗi khi transcribe: ${error.message || "Unknown error"}`);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   // Handle file upload
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -1162,18 +1291,24 @@ export default function MMSEChatbotPage() {
       return;
     }
 
-    // Convert File to Blob
+    // ✅ TRANSCRIBE ONLY: Convert File to Blob and transcribe
     const reader = new FileReader();
-    reader.onload = (event) => {
+    reader.onload = async (event) => {
       if (event.target?.result) {
         const blob = new Blob([event.target.result], { type: file.type });
         setCurrentAudioBlob(blob);
         
-        // Auto-transcribe the uploaded file
-        transcribeAudio(blob);
-        
-        // Show success message
-        console.log(`✅ File uploaded: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`);
+        // ✅ TRANSCRIBE ONLY: Transcribe audio and show in input box for editing
+        // User can edit transcript before submitting
+        if (session) {
+          try {
+            console.log(`✅ File uploaded: ${file.name} (${(file.size / 1024).toFixed(1)} KB). Transcribing...`);
+            await transcribeAudioOnly(blob);
+          } catch (error) {
+            console.error("Error in transcription:", error);
+            // Error is already handled in transcribeAudioOnly, just prevent unhandled rejection
+          }
+        }
       }
     };
     reader.onerror = () => {
@@ -1588,7 +1723,7 @@ export default function MMSEChatbotPage() {
                   {/* ✅ Score Display (separate from progress) */}
                   <div className="text-right">
                     <div className="text-2xl font-bold text-blue-600">
-                      {session.totalScore}/30
+                      {session.totalScore}/35
                     </div>
                     <div className="text-xs text-gray-500">điểm</div>
                   </div>
@@ -1602,14 +1737,14 @@ export default function MMSEChatbotPage() {
                       initial={{ width: 0 }}
                       animate={{ 
                         width: `${session.messages.filter(m => m.type === "user").length > 0 
-                          ? (session.messages.filter(m => m.type === "user").length / 30) * 100 
+                          ? (session.messages.filter(m => m.type === "user").length / 28) * 100 
                           : 0}%` 
                       }}
                       transition={{ duration: 0.5, ease: "easeOut" }}
                     />
                   </div>
                   <span className="text-sm text-gray-600 font-medium min-w-[60px] text-right">
-                    {session.messages.filter(m => m.type === "user").length}/30 câu
+                    {session.messages.filter(m => m.type === "user").length}/28 câu
                   </span>
                 </div>
                 
@@ -1698,13 +1833,69 @@ export default function MMSEChatbotPage() {
                           ? "bg-gradient-to-br from-green-50 to-emerald-50 border-2 border-green-200 text-gray-800 rounded-tl-sm"
                           : "bg-white border border-gray-200 text-gray-800 rounded-tl-sm"
                       }`}>
-                        <p className="whitespace-pre-wrap">
-                          {renderContentWithHiddenWords(
-                            message.content, 
-                            message.hiddenContent, 
-                            message.isRevealed
-                          )}
-                        </p>
+                        {/* Message Content with Hidden Support */}
+                        <HiddenMessage
+                          visibleText={message.content}
+                          hiddenContent={message.hiddenContent}
+                          isRevealed={message.isRevealed}
+                          textSize="lg"
+                          elderlyFriendly={true}
+                        />
+                        
+                        {/* ✅ SPECIAL INTERFACES: Render question-specific UI */}
+                        {message.type === "bot" && message.questionId && message.questionCategory && 
+                         requiresSpecialInterface(message.questionId, message.questionCategory) && (
+                          <div className="mt-4 pt-4 border-t border-gray-200">
+                            <QuestionTypeRenderer
+                              questionId={message.questionId}
+                              questionCategory={message.questionCategory}
+                              displayMode={message.displayMode}
+                              hiddenContent={message.hiddenContent}
+                              currentTranscript={message.questionId === activeQuestionId ? currentTranscript : undefined}
+                              isRecording={isRecording && message.questionId === activeQuestionId}
+                              onStop={() => {
+                                // ✅ AUTO-STOP: Serial 7s - Stop recording and submit final answer
+                                if (isRecording) {
+                                  stopRecording();
+                                }
+                                // Get the last transcript (the 5th answer number)
+                                // Submit it to backend so backend can process and return next question
+                                const finalAnswer = currentTranscript.trim() || "Đã hoàn thành 5 bước tính toán";
+                                if (finalAnswer && session) {
+                                  // Submit final answer - backend will detect it's the 5th answer and advance
+                                  // Use void to explicitly ignore promise (error handling is inside handleUserInput)
+                                  handleUserInput(finalAnswer, currentAudioBlob || undefined).catch(err => {
+                                    console.error("Error in onStop auto-submit:", err);
+                                  });
+                                }
+                              }}
+                              onTimeUp={() => {
+                                // ✅ AUTO-STOP: Verbal Fluency - Stop recording and submit final answer
+                                if (isRecording) {
+                                  stopRecording();
+                                }
+                                // Submit final transcript to backend
+                                // Backend will detect time is up (if elapsed >= 60s) and return feedback
+                                const finalAnswer = currentTranscript.trim() || "Đã kể xong các con vật";
+                                if (finalAnswer && session) {
+                                  // Submit final answer - backend will process and return feedback message
+                                  // Use void to explicitly ignore promise (error handling is inside handleUserInput)
+                                  handleUserInput(finalAnswer, currentAudioBlob || undefined).catch(err => {
+                                    console.error("Error in onTimeUp auto-submit:", err);
+                                  });
+                                }
+                              }}
+                              onAnswer={(answer) => {
+                                // Handle special answer format (for real-time updates)
+                                console.log("Special interface answer:", answer);
+                              }}
+                              onComplete={(result) => {
+                                // Handle completion (if needed)
+                                console.log("Special interface complete:", result);
+                              }}
+                            />
+                          </div>
+                        )}
                         
                         {/* Action Buttons */}
                         {message.actionButtons && message.actionButtons.length > 0 && (

@@ -12,6 +12,7 @@ import logging
 import os
 import re
 import time
+import shutil
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from enum import Enum
@@ -19,6 +20,7 @@ from typing import Dict, List, Optional, Any, Tuple
 from pathlib import Path
 import difflib
 import numpy as np
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +95,20 @@ class SessionState:
     # Acoustic features (per question)
     acoustic_features: Dict[str, Dict[str, float]] = field(default_factory=dict)
     
+    # ✅ FIX: Per-question features with metadata
+    question_features: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    
+    # ✅ FIX: Q&A pairs history
+    qa_pairs: List[Dict[str, Any]] = field(default_factory=list)
+    
+    # ✅ FIX: Aggregated features for final analysis
+    aggregated_acoustic_features: Dict[str, List[float]] = field(default_factory=dict)
+    aggregated_linguistic_features: Dict[str, List[float]] = field(default_factory=dict)
+    
+    # ✅ FIX: Final features (calculated at test completion)
+    final_acoustic_features: Dict[str, float] = field(default_factory=dict)
+    final_linguistic_features: Dict[str, float] = field(default_factory=dict)
+    
     # MCI multimodal result (calculated at end)
     mci_result: Optional[Dict[str, Any]] = None
     
@@ -108,6 +124,7 @@ class SessionState:
     serial_7s_current_value: int = 100  # Start from 100
     
     # ✅ v2.1: Executive Function - Verbal Fluency tracking
+    verbal_fluency_started: bool = False
     verbal_fluency_start_time: Optional[float] = None
     verbal_fluency_animals: List[str] = field(default_factory=list)
     verbal_fluency_completed: bool = False
@@ -221,6 +238,15 @@ class MMSEChatbotService:
             logger.info("✅ MCI Screening Service integrated")
         except ImportError as e:
             logger.warning(f"⚠️ MCI Service not available: {e}")
+        
+        # ✅ OPTIMIZATION: Thread pool for parallel feature extraction
+        self.executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="feature_extraction")
+        logger.info("✅ Thread pool initialized for parallel feature extraction")
+        
+        # ✅ FIX: Create audio storage directory
+        self.audio_storage_dir = Path("data/audio_recordings")
+        self.audio_storage_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(f"✅ Audio storage directory: {self.audio_storage_dir}")
         
         logger.info("✅ MMSEChatbotService initialized with FULL multimodal support")
     
@@ -363,6 +389,9 @@ class MMSEChatbotService:
         if not state:
             return "Lỗi: Không tìm thấy phiên làm việc", {}
         
+        # ✅ FIX: Initialize metadata at the start to avoid "cannot access local variable" error
+        metadata = {}
+
         domain = state.current_domain
         index = state.current_question_index
         
@@ -385,33 +414,34 @@ class MMSEChatbotService:
         
         # ✅ v2.1_CORRECTED: Handle instruction fields (instruction_part1, instruction_part2)
         # For registration domain, combine instruction_part1 and instruction_part2
-        if domain == TestDomain.REGISTRATION and index == 0:
-            instruction_part1 = question.get("instruction_part1", "")
-            instruction_part2 = question.get("instruction_part2", "")
-            if instruction_part1:
-                instruction_part1 = self._replace_greeting(instruction_part1, state.greeting)
-                question_text = f"{instruction_part1}\n\n{question_text}"
-            if instruction_part2:
-                instruction_part2 = self._replace_greeting(instruction_part2, state.greeting)
-                question_text = f"{question_text}\n\n{instruction_part2}"
-        elif index == 0:
-            # For other domains, use single instruction field
-            instruction = question.get("instruction", "")
-            if instruction and instruction not in question_text:
-                instruction = self._replace_greeting(instruction, state.greeting)
-                question_text = f"{instruction}\n\n{question_text}"
+        # ✅ NEW: Use helper method to build display and TTS text with hidden flags
+        actual_question_id = question.get("question_id", f"{domain.value}_{index}")
+        question_text, tts_text = self._build_question_text_with_hidden_flags(question, question_text, state)
         
         # ✅ FIX: Get actual question_id from JSON
-        actual_question_id = question.get("question_id", f"{domain.value}_{index}")
+        if domain != TestDomain.REGISTRATION or index != 0:
+            actual_question_id = question.get("question_id", f"{domain.value}_{index}")
+        
+        # ✅ NEW: Extract hidden flags from question (support both old and new formats)
+        hidden_display = question.get("hidden_display", False)
+        hidden_audio = question.get("hidden_audio", False)
+        
+        # For backward compatibility, check old format flags
+        if not hidden_display:
+            if question.get("words_announcement_hidden", False) or question.get("instruction_after_hidden", False):
+                hidden_display = True
         
         metadata = {
             "domain": domain.value,
             "question_index": index,
             "total_questions": len(questions),
-            "question_id": actual_question_id,  # ✅ Use actual question_id from JSON
+            "question_id": actual_question_id,
             "points": question.get("points", 1),
             "category": question.get("question_category", ""),
-            "completed": False
+            "completed": False,
+            "hidden_display": hidden_display,
+            "hidden_audio": hidden_audio,
+            "tts_text": tts_text  # ✅ NEW: TTS text (may differ from display text)
         }
         
         # ✅ v2.1_CORRECTED: Special handling for Registration
@@ -453,6 +483,9 @@ class MMSEChatbotService:
         if not state:
             return "Lỗi: Không tìm thấy phiên làm việc", {}
         
+        # ✅ FIX: Initialize metadata at the start to avoid "cannot access local variable" error
+        metadata = {}
+
         domain = state.current_domain
         index = state.current_question_index
         
@@ -518,20 +551,71 @@ class MMSEChatbotService:
                 traceback.print_exc()
                 score_result = {'points_earned': 0, 'points_possible': 0, 'is_correct': False, 'feedback': ''}
         
-        # Extract acoustic features if audio file provided (for risk assessment, not scoring)
-        if audio_file and self.acoustic_analyzer:
-            try:
-                logger.info(f"🔊 Extracting acoustic features for {audio_file}")
-                acoustic_features = self.acoustic_analyzer.extract_all_features(
-                    audio_file, 
-                    transcript=answer
-                )
-                state.acoustic_features[f"{domain.value}_{index}"] = acoustic_features
-                logger.info(f"✅ Extracted {len(acoustic_features)} acoustic features")
-            except Exception as e:
-                logger.warning(f"⚠️ Failed to extract acoustic features: {e}")
+        # ✅ FIX: Store Q&A pair
+        if not hasattr(state, 'qa_pairs'):
+            state.qa_pairs = []
         
-        state.responses[domain.value].append(response)
+        qa_pair = {
+            'question_key': actual_question_id,
+            'question_text': question_text,
+            'answer_text': answer,
+            'transcript': answer,  # Will be updated if audio transcription available
+            'audio_path': None,  # Will be updated if audio saved
+            'timestamp': datetime.now().isoformat(),
+            'domain': domain.value
+        }
+        
+        # ✅ FIX: Handle audio and extract/store features
+        permanent_audio_path = None
+        if audio_file:
+            try:
+                # Save audio permanently
+                permanent_audio_path = self._save_audio_permanently(
+                    temp_audio_path=audio_file,
+                    session_id=session_id,
+                    question_key=actual_question_id
+                )
+                
+                if permanent_audio_path:
+                    qa_pair['audio_path'] = permanent_audio_path
+                    logger.info(f"💾 Audio saved: {permanent_audio_path}")
+                
+                # Extract and store features
+                features = self._extract_and_store_features(
+                    audio_path=permanent_audio_path or audio_file,
+                    transcript=answer,
+                    session_state=state,
+                    question_key=actual_question_id
+                )
+                
+                logger.info(f"✅ Features extracted and stored for {actual_question_id}")
+                
+            except Exception as e:
+                logger.error(f"⚠️ Audio processing/feature extraction failed: {e}", exc_info=True)
+                # Continue without features - not critical for scoring
+        elif answer:
+            # Even without audio, extract linguistic features from text answer
+            try:
+                features = self._extract_and_store_features(
+                    audio_path=None,
+                    transcript=answer,
+                    session_state=state,
+                    question_key=actual_question_id
+                )
+                logger.info(f"✅ Linguistic features extracted from text answer")
+            except Exception as e:
+                logger.warning(f"⚠️ Linguistic feature extraction failed: {e}")
+        
+        # Store Q&A pair
+        state.qa_pairs.append(qa_pair)
+        logger.info(f"   ✅ Q&A pair stored (total: {len(state.qa_pairs)})")
+        
+        # FIX: Don't append to responses if domain is COMPLETED
+        if domain != TestDomain.COMPLETED:
+            # Ensure domain exists in responses dict
+            if domain.value not in state.responses:
+                state.responses[domain.value] = []
+            state.responses[domain.value].append(response)
         
         # ✅ v2.1: Special handling for Serial 7s (auto-stop after 5 answers)
         if domain == TestDomain.ATTENTION_CALCULATION and actual_question_id == "attn_serial_sub":
@@ -552,20 +636,64 @@ class MMSEChatbotService:
                     # Check if we have 5 answers (auto-stop)
                     if len(state.serial_7s_answers) >= 5:
                         state.serial_7s_stopped = True
-                        logger.info(f"✅ Serial 7s completed: {state.serial_7s_answers}")
-                        # Move to next domain after this
+                        logger.info(f"✅ Serial 7s COMPLETED: {state.serial_7s_answers}")
+                        
+                        # ✅ Calculate correct count
+                        correct_count = self._count_correct_serial7s_answers(state.serial_7s_answers)
+                        logger.info(f"✅ Serial 7s Score: {correct_count}/5 correct")
+                        
+                        # ✅ Get appropriate completion message based on score
+                        pronoun = self.get_pronoun(session_id, True)
+                        pronoun_lower = self.get_pronoun(session_id, False)
+                        
+                        if correct_count == 5:
+                            completion_message = f"Xuất sắc! {pronoun} tính đúng cả 5 số!"
+                        elif correct_count >= 4:
+                            completion_message = f"Rất tốt! {pronoun} tính đúng {correct_count}/5 số."
+                        elif correct_count >= 3:
+                            completion_message = f"Được rồi! {pronoun} tính đúng {correct_count} số."
+                        elif correct_count >= 2:
+                            completion_message = f"Không sao {pronoun_lower}, phép tính này hơi khó."
+                        else:
+                            completion_message = f"Không sao {pronoun_lower}, chúng ta tiếp tục phần tiếp theo nhé."
+                        
+                        # ✅ Move to next question
                         state.current_question_index += 1
-                        return self._advance_to_next_domain(session_id)
+                        logger.info(f"➡️ Moving to next question: index {state.current_question_index}")
+                        
+                        # ✅ Return completion metadata so frontend knows to stop
+                        metadata['serial_7s_stopped'] = True
+                        metadata['serial_7s_completed'] = True
+                        metadata['serial_7s_answers'] = state.serial_7s_answers
+                        metadata['serial_7s_correct_count'] = correct_count
+                        metadata['serial_7s_score'] = correct_count
+                        metadata['move_to_next_question'] = True
+                        metadata['auto_stopped'] = True
+                        
+                        # ✅ Return completion message, then advance to next question
+                        next_question_text, next_metadata = self._advance_to_next_domain(session_id)
+                        # Merge metadata
+                        next_metadata.update(metadata)
+                        return completion_message, next_metadata
                     else:
                         # Continue asking for next number
-                        next_expected = state.serial_7s_current_value
+                        state.serial_7s_current_value = user_value  # Update current value to user's answer
+                        next_value_to_subtract = state.serial_7s_current_value - 7
                         pronoun = self.get_pronoun(session_id, False)
+                        
+                        remaining = 5 - len(state.serial_7s_answers)
                         next_question = f"Tiếp tục nhé {pronoun}! Lấy {user_value} trừ 7 bằng bao nhiêu?"
+                        
+                        logger.info(f"➡️ Serial 7s: Asking for next ({remaining} remaining)")
+                        
                         metadata['serial_7s'] = {
                             'answers_so_far': state.serial_7s_answers,
-                            'next_expected': next_expected,
-                            'remaining': 5 - len(state.serial_7s_answers)
+                            'current_value': user_value,
+                            'next_expected': next_value_to_subtract,
+                            'remaining': remaining,
+                            'stopped': False
                         }
+                        
                         return next_question, metadata
                 except ValueError:
                     pass
@@ -656,8 +784,7 @@ class MMSEChatbotService:
                 'total_score': state.total_score or 0,
                 'max_score': 35,  # ✅ v2.1_CORRECTED: 35 points total
                 'percentage': round(((state.total_score or 0) / 35) * 100, 1),
-                'is_correct': score_result.get('is_correct', False),
-                'feedback': score_result.get('feedback', '')
+                'is_correct': score_result.get('is_correct', False)
             }
         
         # Add progress info
@@ -751,25 +878,39 @@ class MMSEChatbotService:
             try:
                 logger.info("🧬 Running multimodal MCI analysis (v2.1 pipeline)...")
                 
-                # Aggregate all acoustic features (take mean across all questions)
+                # ✅ CRITICAL: Aggregate all acoustic features (take mean across all questions)
+                logger.info("=" * 80)
+                logger.info("🏁 TEST COMPLETION - Feature Summary")
+                logger.info("=" * 80)
+                
                 all_acoustic = {}
                 if state.acoustic_features:
-                    for question_id, features in state.acoustic_features.items():
+                    logger.info(f"📊 Acoustic features stored: {len(state.acoustic_features)} questions")
+                    for q_id, features in state.acoustic_features.items():
+                        logger.info(f"   {q_id}: {len(features)} features")
+                        logger.debug(f"      Sample: {list(features.keys())[:5]}")
                         for key, value in features.items():
                             if key not in all_acoustic:
                                 all_acoustic[key] = []
                             if isinstance(value, (int, float, np.number)):
-                                all_acoustic[key].append(value)
+                                all_acoustic[key].append(float(value))
                     
                     # Average acoustic features
                     avg_acoustic = {
                         k: float(np.mean(v)) for k, v in all_acoustic.items() if v
                     }
+                    logger.info(f"✅ Aggregated {len(avg_acoustic)} acoustic features (avg from all questions)")
                 else:
+                    logger.warning("⚠️ NO acoustic features found in session_state!")
                     avg_acoustic = {}
                 
-                # Collect linguistic features
+                # ✅ Collect linguistic features
                 linguistic_features = state.linguistic_features or {}
+                if linguistic_features:
+                    logger.info(f"📝 Linguistic features stored: {len(linguistic_features)} features")
+                    logger.debug(f"   Sample: {list(linguistic_features.keys())[:5]}")
+                else:
+                    logger.warning("⚠️ NO linguistic features found!")
                 
                 # ✅ v2.1: Use NEW multimodal integration pipeline
                 from services.mmse_scoring_v21 import calculate_multimodal_risk
@@ -1058,6 +1199,52 @@ class MMSEChatbotService:
                 "education_group": adjusted_score_result.education_group if adjusted_score_result else None
             } if adjusted_score_result else None
         }
+        try:
+            from services.comprehensive_results_generator import generate_comprehensive_results
+            
+            logger.info("🔬 Generating comprehensive results...")
+            
+            # Prepare SHAP explanations
+            shap_explanations = None
+            if state.mci_result:
+                # Try to get SHAP from risk components
+                risk_components = state.mci_result.get('risk_components', {})
+                shap_explanations = {
+                    'feature_contributions': {},
+                    'grouped_contributions': risk_components
+                }
+                logger.info(f"   SHAP input: {list(risk_components.keys())}")
+            
+            # Generate comprehensive results
+            comprehensive_results = generate_comprehensive_results(
+                session_state=state,
+                shap_explanations=shap_explanations
+            )
+            
+            # ✅ CRITICAL: Log what was generated
+            logger.info("✅ Comprehensive results generated:")
+            logger.info(f"   - Sections: {list(comprehensive_results.keys())}")
+            if 'detailed_analysis' in comprehensive_results:
+                da = comprehensive_results['detailed_analysis']
+                logger.info(f"   - Acoustic features: {len(da.get('acoustic', {}))}")
+                logger.info(f"   - Linguistic features: {len(da.get('linguistic', {}))}")
+            if 'multimodal_analysis' in comprehensive_results:
+                ma = comprehensive_results['multimodal_analysis']
+                logger.info(f"   - Multimodal acoustic: {len(ma.get('acoustic_features', {}))}")
+                logger.info(f"   - Multimodal linguistic: {len(ma.get('linguistic_features', {}))}")
+                logger.info(f"   - Combined risk: {ma.get('combined_risk_score', 'N/A')}")
+            if 'shap_explanation' in comprehensive_results:
+                se = comprehensive_results['shap_explanation']
+                logger.info(f"   - SHAP risk factors: {len(se.get('top_risk_factors', []))}")
+                logger.info(f"   - SHAP protective factors: {len(se.get('top_protective_factors', []))}")
+            
+            # Add to metadata
+            metadata['comprehensive_results'] = comprehensive_results
+            
+        except Exception as e:
+            logger.error(f"❌ Comprehensive results generation FAILED: {e}")
+            import traceback
+            traceback.print_exc()
         
         return message, metadata
     
@@ -1114,8 +1301,26 @@ class MMSEChatbotService:
             }
             state.total_score = 0
         
-        # Extract linguistic features from all responses
-        state.linguistic_features = self._extract_linguistic_features(state)
+        # ✅ FIX: Calculate final aggregated features
+        logger.info("🏁 Test complete, calculating final features...")
+        
+        # Calculate aggregated features
+        final_acoustic = self._calculate_final_acoustic_features(state)
+        final_linguistic = self._calculate_final_linguistic_features(state)
+        
+        # Store final features
+        state.final_acoustic_features = final_acoustic
+        state.final_linguistic_features = final_linguistic
+        
+        # Also store in linguistic_features for backward compatibility
+        state.linguistic_features = final_linguistic
+        
+        logger.info(f"   ✅ Final features: Acoustic={len(final_acoustic)}, "
+                   f"Linguistic={len(final_linguistic)}")
+        
+        # Extract linguistic features from all responses (legacy method, kept for compatibility)
+        if not final_linguistic:
+            state.linguistic_features = self._extract_linguistic_features(state)
         
         logger.info(f"✅ Scores calculated (rule-based v2.1): Total={state.total_score}/35")
     
@@ -1164,6 +1369,354 @@ class MMSEChatbotService:
             
         except Exception as e:
             logger.error(f"❌ Failed to extract linguistic features: {e}")
+            return {}
+    
+    def _extract_features_parallel(
+        self,
+        audio_path: str,
+        transcript: str,
+        timeout: int = 60
+    ) -> Tuple[Dict[str, Any], Dict[str, float]]:
+        """
+        ✅ OPTIMIZATION: Extract acoustic & linguistic features in parallel
+        
+        Args:
+            audio_path: Path to audio file
+            transcript: Transcribed text
+            timeout: Maximum time to wait (seconds)
+        
+        Returns:
+            Tuple of (acoustic_features, linguistic_features_dict)
+        """
+        start_time = time.time()
+        logger.info("🚀 Starting PARALLEL feature extraction...")
+        
+        try:
+            # Submit both tasks simultaneously
+            acoustic_future = None
+            linguistic_future = None
+            
+            if self.acoustic_analyzer:
+                logger.info(f"  📤 Submitting acoustic analysis task...")
+                acoustic_future = self.executor.submit(
+                    self._extract_acoustic_safe,
+                    audio_path,
+                    transcript
+                )
+            else:
+                logger.warning("  ⚠️ Acoustic analyzer not available")
+            
+            if self.linguistic_analyzer and transcript:
+                logger.info(f"  📤 Submitting linguistic analysis task...")
+                linguistic_future = self.executor.submit(
+                    self._extract_linguistic_safe,
+                    transcript
+                )
+            else:
+                if not self.linguistic_analyzer:
+                    logger.warning("  ⚠️ Linguistic analyzer not available")
+                if not transcript:
+                    logger.warning("  ⚠️ No transcript provided for linguistic analysis")
+            
+            # Wait for both to complete (with timeout)
+            acoustic_features = {}
+            linguistic_features = {}
+            
+            if acoustic_future:
+                logger.info(f"  ⏳ Waiting for acoustic analysis (timeout: {timeout}s)...")
+                acoustic_features = acoustic_future.result(timeout=timeout)
+                logger.info(f"  ✅ Acoustic analysis completed: {len(acoustic_features)} features")
+            
+            if linguistic_future:
+                logger.info(f"  ⏳ Waiting for linguistic analysis (timeout: {timeout}s)...")
+                linguistic_features = linguistic_future.result(timeout=timeout)
+                logger.info(f"  ✅ Linguistic analysis completed: {len(linguistic_features)} features")
+            
+            elapsed = time.time() - start_time
+            logger.info(f"✅ PARALLEL feature extraction completed in {elapsed:.2f}s")
+            logger.info(f"   - Acoustic: {len(acoustic_features)} features")
+            logger.info(f"   - Linguistic: {len(linguistic_features)} features")
+            
+            return acoustic_features, linguistic_features
+            
+        except FuturesTimeoutError:
+            elapsed = time.time() - start_time
+            logger.error(f"❌ Feature extraction timeout after {elapsed:.0f}s")
+            # Return empty features instead of crashing
+            return {}, {}
+        
+        except Exception as e:
+            elapsed = time.time() - start_time
+            logger.error(f"❌ Feature extraction failed after {elapsed:.2f}s: {e}", exc_info=True)
+            # Return empty features instead of crashing
+            return {}, {}
+    
+    def _extract_acoustic_safe(self, audio_path: str, transcript: str = "") -> Dict[str, Any]:
+        """
+        Safe wrapper for acoustic analysis with error handling
+        """
+        try:
+            start = time.time()
+            logger.info(f"  🔊 Starting acoustic analysis: {audio_path}")
+            features = self.acoustic_analyzer.extract_all_features(
+                audio_path,
+                transcript=transcript
+            )
+            elapsed = time.time() - start
+            logger.info(f"  ✅ Acoustic analysis: {elapsed:.2f}s, {len(features)} features")
+            return features
+            
+        except Exception as e:
+            logger.error(f"  ❌ Acoustic analysis failed: {e}", exc_info=True)
+            # Return empty features instead of crashing
+            return {}
+    
+    def _extract_linguistic_safe(self, transcript: str) -> Dict[str, float]:
+        """
+        Safe wrapper for linguistic analysis with error handling
+        """
+        try:
+            start = time.time()
+            logger.info(f"  📝 Starting linguistic analysis: {len(transcript)} chars")
+            features = self.linguistic_analyzer.extract_all_features(
+                transcript,
+                task_type='mmse_assessment'
+            )
+            elapsed = time.time() - start
+            logger.info(f"  ✅ Linguistic analysis: {elapsed:.2f}s, {len(features)} features")
+            return features
+            
+        except Exception as e:
+            logger.error(f"  ❌ Linguistic analysis failed: {e}", exc_info=True)
+            # Return empty features instead of crashing
+            return {}
+    
+    def _save_audio_permanently(
+        self,
+        temp_audio_path: str,
+        session_id: str,
+        question_key: str
+    ) -> Optional[str]:
+        """
+        Save audio file permanently with organized naming
+        
+        Args:
+            temp_audio_path: Path to temporary audio file
+            session_id: Current session ID
+            question_key: e.g., "orientation_time", "recall_words"
+        
+        Returns:
+            Permanent audio file path (relative to data/) or None if failed
+        """
+        try:
+            if not os.path.exists(temp_audio_path):
+                logger.warning(f"⚠️ Temp audio file not found: {temp_audio_path}")
+                return None
+            
+            # Create session directory
+            session_dir = self.audio_storage_dir / session_id
+            session_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Generate filename with timestamp
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"{question_key}_{timestamp}.wav"
+            
+            permanent_path = session_dir / filename
+            
+            # Copy file (preserve original)
+            shutil.copy2(temp_audio_path, permanent_path)
+            
+            logger.info(f"💾 Saved audio: {permanent_path}")
+            
+            # Return relative path for storage
+            return str(permanent_path.relative_to(self.audio_storage_dir.parent))
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to save audio: {e}", exc_info=True)
+            return None
+    
+    def _extract_and_store_features(
+        self,
+        audio_path: Optional[str],
+        transcript: str,
+        session_state: SessionState,
+        question_key: str
+    ) -> Dict[str, Any]:
+        """
+        Extract features AND store them in session_state
+        
+        This is the CRITICAL function that was missing!
+        
+        Args:
+            audio_path: Path to audio file (optional)
+            transcript: Transcribed text
+            session_state: Current session state
+            question_key: Question identifier
+        
+        Returns:
+            Dictionary with extracted features
+        """
+        
+        logger.info(f"🔬 Extracting features for {question_key}...")
+        
+        features = {
+            'acoustic': {},
+            'linguistic': {},
+            'metadata': {
+                'question_key': question_key,
+                'timestamp': datetime.now().isoformat(),
+                'audio_path': audio_path,
+                'transcript': transcript
+            }
+        }
+        
+        try:
+            # 1. Extract acoustic features
+            # ✅ FIX: Convert relative path to absolute path for checking
+            audio_path_abs = None
+            if audio_path:
+                if os.path.isabs(audio_path):
+                    audio_path_abs = audio_path
+                else:
+                    # Try relative to audio_storage_dir parent
+                    audio_path_abs = os.path.join(self.audio_storage_dir.parent, audio_path)
+                    if not os.path.exists(audio_path_abs):
+                        # Try relative to current working directory
+                        audio_path_abs = os.path.abspath(audio_path)
+                
+                if os.path.exists(audio_path_abs):
+                    acoustic_features = self._extract_acoustic_safe(audio_path_abs, transcript)
+                    features['acoustic'] = acoustic_features
+                    logger.info(f"   ✅ Extracted {len(acoustic_features)} acoustic features")
+                else:
+                    logger.warning(f"   ⚠️ Audio file not found: {audio_path_abs}")
+            else:
+                logger.warning(f"   ⚠️ No audio file for acoustic extraction")
+            
+            # 2. Extract linguistic features
+            if transcript:
+                linguistic_features = self._extract_linguistic_safe(transcript)
+                features['linguistic'] = linguistic_features
+                logger.info(f"   ✅ Extracted {len(linguistic_features)} linguistic features")
+            else:
+                logger.warning(f"   ⚠️ No transcript for linguistic extraction")
+            
+            # 3. CRITICAL: Store in session_state
+            if not hasattr(session_state, 'question_features'):
+                session_state.question_features = {}
+            
+            session_state.question_features[question_key] = features
+            
+            # 4. Store acoustic features per question (for backward compatibility)
+            if features['acoustic']:
+                if not session_state.acoustic_features:
+                    session_state.acoustic_features = {}
+                session_state.acoustic_features[question_key] = features['acoustic']
+            
+            # 5. Update aggregated features
+            self._update_aggregated_features(session_state, features)
+            
+            logger.info(f"   ✅ Features stored in session_state for {question_key}")
+            
+            return features
+            
+        except Exception as e:
+            logger.error(f"   ❌ Feature extraction failed: {e}", exc_info=True)
+            return features
+    
+    def _update_aggregated_features(self, session_state: SessionState, new_features: Dict[str, Any]):
+        """
+        Aggregate features across all questions for final analysis
+        """
+        
+        # Initialize aggregated features if not exists
+        if not hasattr(session_state, 'aggregated_acoustic_features'):
+            session_state.aggregated_acoustic_features = {}
+        
+        if not hasattr(session_state, 'aggregated_linguistic_features'):
+            session_state.aggregated_linguistic_features = {}
+        
+        # Aggregate acoustic features (average or concatenate)
+        for key, value in new_features.get('acoustic', {}).items():
+            if key not in session_state.aggregated_acoustic_features:
+                session_state.aggregated_acoustic_features[key] = []
+            
+            if isinstance(value, (int, float, np.number)):
+                session_state.aggregated_acoustic_features[key].append(float(value))
+        
+        # Aggregate linguistic features
+        for key, value in new_features.get('linguistic', {}).items():
+            if key not in session_state.aggregated_linguistic_features:
+                session_state.aggregated_linguistic_features[key] = []
+            
+            if isinstance(value, (int, float, np.number)):
+                session_state.aggregated_linguistic_features[key].append(float(value))
+        
+        logger.debug(f"   📊 Aggregated features updated: "
+                    f"Acoustic={len(session_state.aggregated_acoustic_features)}, "
+                    f"Linguistic={len(session_state.aggregated_linguistic_features)}")
+    
+    def _calculate_final_acoustic_features(self, session_state: SessionState) -> Dict[str, float]:
+        """
+        Calculate final acoustic features by averaging across all questions
+        """
+        
+        aggregated = getattr(session_state, 'aggregated_acoustic_features', {})
+        final_features = {}
+        
+        for feature_name, values in aggregated.items():
+            if values:
+                # Average for most features
+                if feature_name in ['f0_mean', 'f0_std', 'jitter', 'shimmer', 'hnr', 
+                                   'pause_rate', 'speaking_rate', 'articulation_rate',
+                                   'f0_f0_mean', 'f0_f0_std', 'vq_jitter_local', 'vq_shimmer_local']:
+                    final_features[feature_name] = sum(values) / len(values)
+                
+                # Sum for count features
+                elif feature_name in ['pause_count', 'word_count']:
+                    final_features[feature_name] = sum(values)
+                
+                # Use last value for cumulative features
+                else:
+                    final_features[feature_name] = values[-1]
+        
+        logger.info(f"   📊 Final acoustic features calculated: {len(final_features)} features")
+        return final_features
+    
+    def _calculate_final_linguistic_features(self, session_state: SessionState) -> Dict[str, float]:
+        """
+        Calculate final linguistic features across all transcripts
+        """
+        
+        # Concatenate all transcripts
+        all_transcripts = []
+        qa_pairs = getattr(session_state, 'qa_pairs', [])
+        
+        for qa in qa_pairs:
+            if qa.get('transcript'):
+                all_transcripts.append(qa['transcript'])
+            elif qa.get('answer_text'):
+                all_transcripts.append(qa['answer_text'])
+        
+        # Also check responses
+        for domain, responses in session_state.responses.items():
+            for response in responses:
+                if response.user_answer:
+                    all_transcripts.append(response.user_answer)
+        
+        if not all_transcripts:
+            logger.warning("   ⚠️ No transcripts for linguistic analysis")
+            return {}
+        
+        combined_text = " ".join(all_transcripts)
+        
+        # Extract linguistic features from combined text
+        if self.linguistic_analyzer:
+            linguistic_features = self._extract_linguistic_safe(combined_text)
+            logger.info(f"   📊 Final linguistic features calculated: {len(linguistic_features)} features")
+            return linguistic_features
+        else:
+            logger.warning("   ⚠️ Linguistic analyzer not available")
             return {}
     
     def _evaluate_domain_with_gpt4o(self, state: SessionState, domain: str, max_score: int) -> int:
@@ -1731,6 +2284,225 @@ Trả về JSON với format:
         
         return []
     
+    def _extract_animals_from_text(self, text: str) -> List[str]:
+        """
+        Extract potential animal names from Vietnamese text
+        
+        Simple extraction - split text and filter out common stop words
+        In production, use NLP or named entity recognition for better accuracy
+        
+        Args:
+            text: Input text containing animal names
+            
+        Returns:
+            List of potential animal names (words)
+        """
+        if not text or not text.strip():
+            return []
+        
+        # Split by common separators
+        words = re.split(r'[,\s]+', text.lower().strip())
+        
+        # Filter out empty strings and very short words
+        words = [w.strip() for w in words if w.strip() and len(w.strip()) > 1]
+        
+        # Filter out common stop words and classifiers
+        stop_words = {'con', 'cái', 'chiếc', 'cây', 'bài', 'của', 'và', 'hoặc', 'là', 'có', 'được', 'sẽ', 'đã', 'đang', 'rồi', 'nhé', 'ạ', 'ơi', 'nào', 'đó', 'này', 'khi', 'nếu', 'với', 'theo', 'từ', 'về', 'trong', 'ngoài', 'trên', 'dưới', 'sau', 'trước', 'giữa', 'bên'}
+        animals = [w for w in words if w not in stop_words]
+        
+        return animals
+    
+    def _count_correct_serial7s_answers(self, answers: List[int]) -> int:
+        """
+        Count how many Serial 7s answers are objectively correct.
+        Expected sequence: [93, 86, 79, 72, 65]
+        
+        Args:
+            answers: List of user answers (integers)
+            
+        Returns:
+            Number of correct answers
+        """
+        expected = [93, 86, 79, 72, 65]
+        correct_count = 0
+        
+        for i, answer in enumerate(answers):
+            if i < len(expected) and answer == expected[i]:
+                correct_count += 1
+                logger.debug(f"✓ Serial 7s Answer {i+1}: {answer} is correct (expected {expected[i]})")
+            elif i < len(expected):
+                logger.debug(f"✗ Serial 7s Answer {i+1}: {answer} is incorrect (expected {expected[i]})")
+        
+        logger.info(f"✅ Serial 7s correct count: {correct_count}/{len(answers)}")
+        return correct_count
+    def _build_question_text_with_hidden_flags(self, question: Dict, question_text: str, state: SessionState) -> Tuple[str, str]:
+        """
+        ✅ NEW: Build display text and TTS text separately based on hidden flags
+        Handles: registration, repetition (lang_repetition), bee question (lang_comprehension_listening), memory recall
+        
+        Args:
+        question: Question data from JSON
+        question_text: Base question text
+        state: Session state
+        
+        Returns:
+        Tuple of (display_text, tts_text)
+        """
+        display_parts = []
+        tts_parts = []
+        
+        # Helper to check if content should be hidden from display
+        def is_hidden_display(field_name: str, default: bool = False) -> bool:
+            if f"{field_name}_hidden" in question:
+                return question.get(f"{field_name}_hidden", default)
+            return question.get("hidden_display", default)
+        
+        # Helper to check if content should be hidden from audio (not read by TTS)
+        def is_hidden_audio(field_name: str, default: bool = False) -> bool:
+            if f"{field_name}_tts" in question:
+                return not question.get(f"{field_name}_tts", True)  # Inverted: tts=True means not hidden
+            return question.get("hidden_audio", default)
+        
+        # 1. Instruction - check instruction_hidden and instruction_tts flags
+        instruction = question.get("instruction", "")
+        if instruction:
+            instruction = self._replace_greeting(instruction, state.greeting)
+        # For lang_repetition: instruction_hidden=true, instruction_tts=false
+        if not is_hidden_display("instruction", False):
+            display_parts.append(instruction)
+        if not is_hidden_audio("instruction", False):
+            tts_parts.append(instruction)
+        
+        # 2. Main question text - check for memory recall words to hide AND markdown bold
+        # ✅ FIX: Initialize processed texts
+        display_text_processed = question_text if question_text else ""
+        tts_text_processed = question_text if question_text else ""
+        
+        if question_text:
+            # ✅ FIX: Remove markdown bold (**text**) from display but keep in TTS
+            import re
+            # Pattern to match **text** (markdown bold)
+            bold_pattern = r'\*\*(.*?)\*\*'
+            
+            # Find all bold sections
+            bold_matches = list(re.finditer(bold_pattern, question_text))
+            
+            if bold_matches:
+                # For display: replace **text** with [...] or remove entirely
+                display_text_processed = re.sub(bold_pattern, '[...]', question_text)
+                # Clean up multiple consecutive [...]
+                display_text_processed = re.sub(r'\[\.\.\.\](?:\s*\[\.\.\.\])+', '[...]', display_text_processed)
+                # Remove leading/trailing whitespace around [...]
+                display_text_processed = re.sub(r'\s+\[\.\.\.\]\s+', ' [...] ', display_text_processed)
+                # Clean up extra spaces
+                display_text_processed = re.sub(r'\s+', ' ', display_text_processed).strip()
+                
+                # For TTS: remove ** markers but keep content
+                tts_text_processed = re.sub(bold_pattern, r'\1', question_text)
+                
+                logger.info(f"   🔍 Found {len(bold_matches)} bold sections, hiding from display")
+            
+            # ✅ FIX: Hide "Con mèo, Chiếc xe, Cây lúa" from display but keep in TTS
+            question_id = question.get("question_id", "").lower()
+            is_recall = "recall" in question_id or "rec_" in question_id
+        else:
+            is_recall = False
+        
+        if is_recall:
+            # Hide memory words from display
+            words_patterns = [
+                "Ba từ đó là: Con mèo, Chiếc xe, Cây lúa.",
+                "Ba từ đó là: Con mèo, Chiếc xe, Cây lúa",
+                "Con mèo, Chiếc xe, Cây lúa",
+                "Con mèo, Chiếc xe, Cây lúa."
+            ]
+            
+            display_text_clean = display_text_processed  # Use processed text (bold already removed)
+            hidden_parts = []
+            
+            for pattern in words_patterns:
+                if pattern in display_text_clean:
+                    display_text_clean = display_text_clean.replace(pattern, "").strip()
+                    hidden_parts.append(pattern)
+            
+            # Also check line by line for any line containing these words
+            if not hidden_parts:
+                lines = display_text_clean.split('\n')
+                visible_lines = []
+                for line in lines:
+                    if any(word in line for word in ["Con mèo", "Chiếc xe", "Cây lúa"]):
+                        hidden_parts.append(line)
+                    else:
+                        visible_lines.append(line)
+                display_text_clean = '\n'.join(visible_lines).strip()
+            
+            if hidden_parts:
+                display_parts.append(display_text_clean)
+                tts_parts.append(tts_text_processed)  # TTS reads full text including words (with bold removed)
+            else:
+                display_parts.append(display_text_processed)
+                tts_parts.append(tts_text_processed)
+        else:
+            # Not a recall question, but may have bold text
+            display_parts.append(display_text_processed)
+            tts_parts.append(tts_text_processed)
+        
+        # 3. Words announcement (for registration) - hidden from display but in TTS
+        words_announcement = question.get("words_announcement", "")
+        if words_announcement:
+            words_announcement = words_announcement.replace("**", "")
+        words_announcement = self._replace_greeting(words_announcement, state.greeting)
+        # Default: hidden from display (True) but in TTS (False = not hidden from audio)
+        if not is_hidden_display("words_announcement", True):
+            display_parts.append(words_announcement)
+        if not is_hidden_audio("words_announcement", False):
+            tts_parts.append(words_announcement)
+        
+        # 4. Sentence to repeat (for lang_repetition) - sentence_to_repeat_hidden=false, sentence_to_repeat_tts=true
+        sentence_to_repeat = question.get("sentence_to_repeat", "")
+        if sentence_to_repeat:
+            sentence_to_replace = self._replace_greeting(sentence_to_repeat, state.greeting)
+        # Check flags: sentence_to_repeat_hidden, sentence_to_repeat_tts
+        if not is_hidden_display("sentence_to_repeat", False):
+            display_parts.append(sentence_to_repeat)
+        if not is_hidden_audio("sentence_to_repeat", False):  # Default: read in TTS
+            tts_parts.append(sentence_to_repeat)
+        
+        # 5. Sentence to listen (for lang_comprehension_listening) - sentence_to_listen_hidden=true, sentence_to_listen_tts=true
+        sentence_to_listen = question.get("sentence_to_listen", "")
+        if sentence_to_listen:
+            sentence_to_listen = self._replace_greeting(sentence_to_listen, state.greeting)
+        # Check flags: sentence_to_listen_hidden, sentence_to_listen_tts
+        # Default: hidden from display (True) but in TTS (False = not hidden from audio)
+        if not is_hidden_display("sentence_to_listen", True):
+            display_parts.append(sentence_to_listen)
+        if not is_hidden_audio("sentence_to_listen", False):  # Default: read in TTS
+            tts_parts.append(sentence_to_listen)
+        
+        # 6. Instruction after (for registration) - completely hidden
+        instruction_after = question.get("instruction_after", "")
+        if instruction_after:
+            instruction_after = self._replace_greeting(instruction_after, state.greeting)
+        # Default: hidden from display (True) and hidden from audio (True)
+        if not is_hidden_display("instruction_after", True):
+            display_parts.append(instruction_after)
+        if not is_hidden_audio("instruction_after", True):
+            tts_parts.append(instruction_after)
+        
+        # Build final texts
+        display_text = "\n\n".join(part for part in display_parts if part)
+        
+        # Check if metadata has tts_text (highest priority)
+        metadata = question.get("metadata", {})
+        if isinstance(metadata, dict) and metadata.get("tts_text"):
+            tts_text = self._replace_greeting(metadata.get("tts_text"), state.greeting)
+        elif tts_parts:
+            tts_text = "\n\n".join(part for part in tts_parts if part)
+        else:
+            tts_text = display_text  # Fallback
+        
+        return display_text, tts_text
+
     def _replace_greeting(self, text: str, greeting: str) -> str:
         """
         ✅ v2.1_CORRECTED: Replace pronoun placeholders

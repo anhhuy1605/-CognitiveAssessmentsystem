@@ -317,7 +317,7 @@ def submit_answer():
             # Check if session exists, create if not
             state = chatbot_service.get_session(session_id)
             if not state:
-                logger.info(f"⚠️ Session {session_id} not found, creating new session")
+                logger.warning(f"⚠️ Session {session_id} not found during submit_answer, creating new session (this may reset progress!)")
                 # Try to get user_info from request if available
                 user_info = {}
                 try:
@@ -328,24 +328,36 @@ def submit_answer():
                 except:
                     pass
                 
-                # Create session
+                # Create session - WARNING: This will reset all progress!
                 state = chatbot_service.create_session(session_id, user_info)
-                logger.info(f"✅ Auto-created session: {session_id}")
+                logger.warning(f"⚠️ Auto-created NEW session: {session_id} (previous progress may be lost)")
+            else:
+                # Log current state for debugging
+                logger.debug(f"📊 Session {session_id} state: domain={state.current_domain.value}, index={state.current_question_index}, total_score={state.total_score}")
             
             # Submit to service
-            message, metadata = chatbot_service.submit_answer(
-                session_id=session_id,
-                answer=answer,
-                audio_file=audio_path,
-                confidence=0.9
-            )
+            try:
+                message, metadata = chatbot_service.submit_answer(
+                    session_id=session_id,
+                    answer=answer,
+                    audio_file=audio_path,
+                    confidence=0.9
+                )
+                # ✅ FIX: Ensure metadata is always a dict
+                if not isinstance(metadata, dict):
+                    metadata = {}
+            except Exception as submit_error:
+                logger.error(f"❌ Error in submit_answer: {submit_error}", exc_info=True)
+                # Return graceful error response
+                message = "Xin lỗi, có lỗi xảy ra khi xử lý câu trả lời. Vui lòng thử lại."
+                metadata = {}
             
             # ✅ REAL-TIME: Return comprehensive response with score updates
             response_data = {
                 'success': True,
                 'status': 'success',
                 'message': message,
-                'metadata': metadata,
+                'metadata': metadata or {},  # ✅ FIX: Ensure metadata is always a dict
                 'transcript': answer
             }
             
@@ -358,10 +370,19 @@ def submit_answer():
                 response_data['progress'] = metadata['progress']
             
             # Add test completion status
-            if metadata.get('test_complete'):
+            if metadata.get('test_complete') or metadata.get('completed'):
                 response_data['test_complete'] = True
                 if metadata.get('final_score'):
                     response_data['final_score'] = metadata['final_score']
+                elif metadata.get('total_score') is not None:
+                    # Fallback: construct final_score from total_score
+                    response_data['final_score'] = {
+                        'total': metadata.get('total_score', 0),
+                        'max': 35,  # v2.1: 35 points total
+                        'percentage': round((metadata.get('total_score', 0) / 35) * 100, 1)
+                    }
+                if metadata.get('comprehensive_results'):
+                    response_data['comprehensive_results'] = metadata['comprehensive_results']
             
             return jsonify(response_data)
         else:
@@ -441,6 +462,42 @@ def save_results():
                     if state.total_score is not None:
                         mmse_score = int(state.total_score)
                         full_data['totalScore'] = mmse_score
+                    if state.completed_at:
+                        try:
+                            from services.comprehensive_results_generator import generate_comprehensive_results
+                            shap_explanations = None
+                            if state.mci_result:
+                                shap_explanations = {
+                                    'feature_contributions': {},
+                                    'grouped_contributions': state.mci_result.get('risk_components', {})
+                                }
+                            
+                            # ✅ FIX: Log feature availability before generating results
+                            final_acoustic = getattr(state, 'final_acoustic_features', {})
+                            final_linguistic = getattr(state, 'final_linguistic_features', {})
+                            logger.info(f"📊 Generating comprehensive results with features: "
+                                       f"Acoustic={len(final_acoustic)}, Linguistic={len(final_linguistic)}")
+                            
+                            comprehensive_results = generate_comprehensive_results(
+                                session_state=state,
+                                shap_explanations=shap_explanations
+                            )
+                            
+                            # ✅ FIX: Validate features are in results
+                            acoustic_count = comprehensive_results.get('feature_summary', {}).get('acoustic_feature_count', 0)
+                            linguistic_count = comprehensive_results.get('feature_summary', {}).get('linguistic_feature_count', 0)
+                            
+                            if acoustic_count == 0:
+                                logger.error("❌ NO ACOUSTIC FEATURES in comprehensive results!")
+                            if linguistic_count == 0:
+                                logger.error("❌ NO LINGUISTIC FEATURES in comprehensive results!")
+                            
+                            full_data['comprehensive_results'] = comprehensive_results
+                            logger.info("✅ Comprehensive results included in save_results")
+                        except Exception as e:
+                            logger.warning(f"⚠️ Failed to generate comprehensive results in save_results: {e}")
+                            import traceback
+                            traceback.print_exc()
                     elif 'totalScore' in data:
                         mmse_score = int(data.get('totalScore', 0))
                     
@@ -498,26 +555,292 @@ def save_results():
 
 @mmse_chatbot_bp.route('/results/<session_id>', methods=['GET'])
 def get_results(session_id: str):
-    """Get results for a specific session"""
+    """Get comprehensive results for a specific session"""
     try:
-        results_dir = os.path.join(os.path.dirname(__file__), '..', 'results', 'chatbot')
-        result_file = os.path.join(results_dir, f"{session_id}.json")
+        init_services()
         
-        if os.path.exists(result_file):
-            with open(result_file, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            return jsonify({
-                'success': True,
-                'data': data
-            })
-        else:
+        if not chatbot_service:
             return jsonify({
                 'success': False,
-                'error': 'Session not found'
+                'error': 'Chatbot service not initialized'
+            }), 500
+        
+        # Get session state
+        state = chatbot_service.get_session(session_id)
+        
+        # ✅ FIX: If session not in memory, try to load from saved JSON file
+        if not state:
+            logger.warning(f"Session {session_id} not in memory, trying to load from file...")
+            try:
+                results_dir = os.path.join(os.path.dirname(__file__), '..', 'results', 'chatbot')
+                result_file = os.path.join(results_dir, f"{session_id}.json")
+                
+                if os.path.exists(result_file):
+                    logger.info(f"Found saved results file: {result_file}")
+                    with open(result_file, 'r', encoding='utf-8') as f:
+                        saved_data = json.load(f)
+                    
+                    # Try to reconstruct session state from saved data
+                    # Return the saved comprehensive results directly if available
+                    comprehensive_results = None
+                    
+                    # Check different possible structures (both camelCase and snake_case)
+                    if 'comprehensiveResults' in saved_data:
+                        comprehensive_results = saved_data['comprehensiveResults']
+                    elif 'comprehensive_results' in saved_data:
+                        comprehensive_results = saved_data['comprehensive_results']
+                    elif 'data' in saved_data:
+                        if isinstance(saved_data['data'], dict):
+                            if 'comprehensiveResults' in saved_data['data']:
+                                comprehensive_results = saved_data['data']['comprehensiveResults']
+                            elif 'comprehensive_results' in saved_data['data']:
+                                comprehensive_results = saved_data['data']['comprehensive_results']
+                            elif 'assessment_result' in saved_data['data']:
+                                # This IS the comprehensive results structure
+                                comprehensive_results = saved_data['data']
+                    # Also check at root level if it looks like comprehensive results structure
+                    elif 'assessment_result' in saved_data:
+                        comprehensive_results = saved_data
+                    
+                    if comprehensive_results:
+                        logger.info(f"✅ Loaded comprehensive results from file for session {session_id}")
+                        return jsonify({
+                            'success': True,
+                            'data': comprehensive_results,
+                            'session_id': session_id,
+                            'completed_at': saved_data.get('completedAt') or saved_data.get('completed_at') or (comprehensive_results.get('metadata', {}).get('timestamp') if isinstance(comprehensive_results, dict) else None),
+                            'loaded_from_file': True
+                        })
+                    else:
+                        logger.warning(f"Saved file exists but no comprehensive_results found. Keys: {list(saved_data.keys())}")
+                        # If we have the raw data but no comprehensive_results, we can't generate it without session state
+                        # Return error but suggest the file structure
+                        return jsonify({
+                            'success': False,
+                            'error': 'Comprehensive results not found in saved file',
+                            'message': f'File exists but does not contain comprehensive_results. Available keys: {list(saved_data.keys())[:10]}',
+                            'file_path': result_file
+                        }), 404
+            except Exception as e:
+                logger.warning(f"Could not load session from file: {e}")
+        
+        if not state:
+            return jsonify({
+                'success': False,
+                'error': 'Session not found',
+                'message': 'Session not found in memory or saved files'
             }), 404
+        
+        # Check if test is completed
+        if not state.completed_at:
+            return jsonify({
+                'success': False,
+                'error': 'Test not completed yet',
+                'in_progress': True
+            }), 400
+        
+        # ✅ COMPREHENSIVE RESULTS: Generate full results
+        try:
+            from services.comprehensive_results_generator import generate_comprehensive_results
+            
+            # ✅ CRITICAL: Log state before generating results
+            logger.info("=" * 80)
+            logger.info(f"📊 GET RESULTS for session: {session_id}")
+            logger.info("=" * 80)
+            
+            # ✅ FIX: Check final features first
+            final_acoustic = getattr(state, 'final_acoustic_features', {})
+            final_linguistic = getattr(state, 'final_linguistic_features', {})
+            qa_pairs = getattr(state, 'qa_pairs', [])
+            question_features = getattr(state, 'question_features', {})
+            
+            logger.info(f"   Final acoustic features: {len(final_acoustic)} features")
+            logger.info(f"   Final linguistic features: {len(final_linguistic)} features")
+            logger.info(f"   Q&A pairs: {len(qa_pairs)} pairs")
+            logger.info(f"   Per-question features: {len(question_features)} questions")
+            logger.info(f"   Acoustic features (per question): {len(state.acoustic_features) if state.acoustic_features else 0} questions")
+            logger.info(f"   Linguistic features (legacy): {len(state.linguistic_features) if state.linguistic_features else 0} features")
+            logger.info(f"   MCI result: {'Yes' if state.mci_result else 'No'}")
+            logger.info(f"   Domain scores: {state.domain_scores}")
+            
+            if not final_acoustic:
+                logger.error("   ❌ NO FINAL ACOUSTIC FEATURES FOUND!")
+            if not final_linguistic:
+                logger.error("   ❌ NO FINAL LINGUISTIC FEATURES FOUND!")
+            
+            # Generate SHAP explanations
+            shap_explanations = None
+            if state.mci_result:
+                shap_explanations = {
+                    'feature_contributions': {},
+                    'grouped_contributions': state.mci_result.get('risk_components', {})
+                }
+                logger.info(f"   SHAP input: {list(shap_explanations['grouped_contributions'].keys())}")
+            
+            comprehensive_results = generate_comprehensive_results(
+                session_state=state,
+                shap_explanations=shap_explanations
+            )
+            
+            # ✅ CRITICAL: Ensure features are in response
+            if 'multimodal_analysis' not in comprehensive_results:
+                logger.warning("⚠️ multimodal_analysis missing from comprehensive_results!")
+            else:
+                ma = comprehensive_results['multimodal_analysis']
+                if not ma.get('acoustic_features'):
+                    logger.warning("⚠️ acoustic_features missing from multimodal_analysis!")
+                if not ma.get('linguistic_features'):
+                    logger.warning("⚠️ linguistic_features missing from multimodal_analysis!")
+            
+            # ✅ Aggregate acoustic features for debug info
+            avg_acoustic_count = 0
+            if state.acoustic_features:
+                all_acoustic = {}
+                for q_id, features in state.acoustic_features.items():
+                    for k, v in features.items():
+                        if k not in all_acoustic:
+                            all_acoustic[k] = []
+                        if isinstance(v, (int, float)):
+                            all_acoustic[k].append(float(v))
+                avg_acoustic_count = len(all_acoustic)
+            
+            return jsonify({
+                'success': True,
+                'data': comprehensive_results,
+                'session_id': session_id,
+                'completed_at': state.completed_at,
+                '_debug': {
+                    'acoustic_count': avg_acoustic_count,
+                    'linguistic_count': len(state.linguistic_features) if state.linguistic_features else 0,
+                    'has_mci_result': state.mci_result is not None
+                }
+            })
+            
+        except Exception as e:
+            logger.error(f"Error generating comprehensive results: {e}", exc_info=True)
+            # Fallback to basic results
+            return jsonify({
+                'success': True,
+                'data': {
+                    'assessment_result': {
+                        'mmse_score': state.total_score or 0,
+                        'classification': getattr(state, 'classification', 'Unknown'),
+                        'risk_level': state.mci_result.get('risk_level', 'on') if state.mci_result else 'on'
+                    },
+                    'error': 'Comprehensive results generation failed',
+                    'fallback': True
+                },
+                'session_id': session_id
+            })
             
     except Exception as e:
-        logger.error(f"Error getting results: {e}")
+        logger.error(f"Error getting results: {e}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@mmse_chatbot_bp.route('/sessions', methods=['GET'])
+def list_completed_sessions():
+    """List all completed sessions for comprehensive results page"""
+    try:
+        init_services()
+        
+        if not chatbot_service:
+            return jsonify({
+                'success': False,
+                'error': 'Chatbot service not initialized'
+            }), 500
+        
+        # Get all sessions from service
+        # Note: This requires service to have a method to list all sessions
+        # For now, we'll check if service has a sessions dict/attribute
+        sessions = []
+        
+        try:
+            # Try to access internal sessions dict if available
+            if hasattr(chatbot_service, 'sessions'):
+                for session_id, state in chatbot_service.sessions.items():
+                    if state and state.completed_at:
+                        sessions.append({
+                            'sessionId': session_id,
+                            'completedAt': state.completed_at.isoformat() if hasattr(state.completed_at, 'isoformat') else str(state.completed_at),
+                            'totalScore': state.total_score or 0,
+                            'riskLevel': state.mci_result.get('risk_level', 'on') if state.mci_result else 'on',
+                            'userInfo': state.user_info if hasattr(state, 'user_info') else {}
+                        })
+        except Exception as e:
+            logger.warning(f"Could not list sessions from service: {e}")
+        
+        # Sort by completed_at descending (most recent first)
+        sessions.sort(key=lambda x: x.get('completedAt', ''), reverse=True)
+        
+        return jsonify({
+            'success': True,
+            'sessions': sessions,
+            'count': len(sessions)
+        })
+        
+    except Exception as e:
+        logger.error(f"Error listing sessions: {e}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@mmse_chatbot_bp.route('/test/create-full-session', methods=['POST'])
+def create_test_full_session():
+    """Create a test session with complete features for debugging comprehensive results"""
+    try:
+        init_services()
+        
+        if not chatbot_service:
+            return jsonify({
+                'success': False,
+                'error': 'Chatbot service not initialized'
+            }), 500
+        
+        logger.info("🧪 Creating test session with complete features via API...")
+        
+        # Import and run the test creation function
+        import sys
+        from pathlib import Path
+        backend_path = Path(__file__).parent.parent
+        sys.path.insert(0, str(backend_path))
+        
+        from test_comprehensive_results import create_test_session_with_features
+        
+        result = create_test_session_with_features(service_instance=chatbot_service)
+        if not result:
+            return jsonify({
+                'success': False,
+                'error': 'Failed to create test session'
+            }), 500
+        
+        session_id, state = result
+        
+        return jsonify({
+            'success': True,
+            'session_id': session_id,
+            'message': 'Test session created with complete features',
+            'summary': {
+                'total_score': state.total_score,
+                'acoustic_features_count': len(state.acoustic_features),
+                'linguistic_features_count': len(state.linguistic_features),
+                'risk_level': state.mci_result['risk_level'] if state.mci_result else None,
+                'completed_at': state.completed_at
+            },
+            'api_endpoint': f'/api/mmse/chatbot/results/{session_id}',
+            'test_files': {
+                'json': f'test_comprehensive_results_{session_id}.json',
+                'summary': f'test_comprehensive_summary_{session_id}.txt'
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"❌ Error creating test session: {e}", exc_info=True)
         return jsonify({
             'success': False,
             'error': str(e)

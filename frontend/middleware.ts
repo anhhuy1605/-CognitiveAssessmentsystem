@@ -15,26 +15,38 @@ const isApiRoute = createRouteMatcher([
 ]);
 
 export default clerkMiddleware(async (auth, request) => {
-  // Skip authentication for API routes during development
+  // Skip authentication for API routes
   if (isApiRoute(request)) {
     return;
   }
 
   // Check if Clerk is properly configured
+  const publishableKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+  const isClerkConfigured = publishableKey && 
+                            !publishableKey.includes('placeholder') && 
+                            publishableKey !== '';
+
+  // If Clerk is not configured, allow all routes (development mode)
+  if (!isClerkConfigured) {
+    return;
+  }
+
+  // For public routes, skip protection
+  if (isPublicRoute(request)) {
+    return;
+  }
+
+  // Protect non-public routes only if Clerk is available
   try {
-    const publishableKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
-    if (!publishableKey || publishableKey.includes('placeholder') || publishableKey === '') {
-      console.warn('Clerk middleware: No valid key, skipping protection');
+    await auth.protect();
+  } catch (error: any) {
+    // ✅ FIX: Only log actual errors, not expected 404s from Next.js
+    if (error?.digest && error.digest.includes('NEXT_HTTP_ERROR_FALLBACK')) {
+      // This is a Next.js internal error, not a Clerk error - ignore it
       return;
     }
-
-    // Protect non-public routes only if Clerk is available
-    if (!isPublicRoute(request)) {
-      await auth.protect();
-    }
-  } catch (error) {
-    console.warn('Clerk middleware error:', error);
-    // Skip protection if Clerk fails
+    // Log other errors but don't block the request
+    console.warn('Clerk middleware error:', error?.message || error);
     return;
   }
 });

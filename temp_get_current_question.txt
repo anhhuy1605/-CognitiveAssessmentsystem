@@ -1,0 +1,102 @@
+﻿    def get_current_question(self, session_id: str) -> Tuple[str, Dict]:
+        """Get current question with metadata"""
+        state = self.get_session(session_id)
+        if not state:
+            return "Lá»—i: KhÃ´ng tÃ¬m tháº¥y phiÃªn lÃ m viá»‡c", {}
+        
+        # âœ… FIX: Initialize metadata at the start to avoid "cannot access local variable" error
+        metadata = {}
+
+        domain = state.current_domain
+        index = state.current_question_index
+        
+        if domain == TestDomain.COMPLETED:
+            return "BÃ i kiá»ƒm tra Ä‘Ã£ hoÃ n thÃ nh.", {"completed": True}
+        
+        # Get domain questions
+        questions = self._get_domain_questions(domain.value)
+        
+        if not questions or index >= len(questions):
+            # Move to next domain
+            return self._advance_to_next_domain(session_id)
+        
+        question = questions[index]
+        # âœ… v2.1_CORRECTED: Use "question" field from new JSON structure, fallback to old fields
+        question_text = self._replace_greeting(
+            question.get("question", question.get("chatbot_message", question.get("question_text", ""))), 
+            state.greeting
+        )
+        
+        # âœ… v2.1_CORRECTED: Handle instruction fields (instruction_part1, instruction_part2)
+        # For registration domain, combine instruction_part1 and instruction_part2
+        actual_question_id = question.get("question_id", f"{domain.value}_{index}")
+        if domain == TestDomain.REGISTRATION and index == 0:
+            message_parts = []
+            
+            # 1. Instruction
+            instruction = question.get("instruction", "")
+            if instruction:
+                instruction = self._replace_greeting(instruction, state.greeting)
+                message_parts.append(instruction)
+            
+            # 2. Question (main question text)
+            if question_text:
+                message_parts.append(question_text)
+            
+            # 3. Words announcement (for registration)
+            words_announcement = question.get("words_announcement", "")
+            if words_announcement:
+                # Remove markdown bold if present (safety check)
+                words_announcement = words_announcement.replace("**", "")
+                words_announcement = self._replace_greeting(words_announcement, state.greeting)
+                message_parts.append(words_announcement)
+            
+            # 4. Instruction after (for registration)
+            instruction_after = question.get("instruction_after", "")
+            if instruction_after:
+                instruction_after = self._replace_greeting(instruction_after, state.greeting)
+                message_parts.append(instruction_after)
+            
+            # Join with double newline for clear separation
+            question_text = "\n\n".join(part for part in message_parts if part)
+        elif index == 0:
+            # For other domains, use single instruction field
+            instruction = question.get("instruction", "")
+            if instruction and instruction not in question_text:
+                instruction = self._replace_greeting(instruction, state.greeting)
+                question_text = f"{instruction}\n\n{question_text}"
+        
+        # âœ… FIX: Get actual question_id from JSON
+        if domain != TestDomain.REGISTRATION or index != 0:
+            actual_question_id = question.get("question_id", f"{domain.value}_{index}")
+        
+        metadata = {
+            "domain": domain.value,
+            "question_index": index,
+            "total_questions": len(questions),
+            "question_id": actual_question_id,  # âœ… Use actual question_id from JSON
+            "points": question.get("points", 1),
+            "category": question.get("question_category", ""),
+            "completed": False
+        }
+        
+        # âœ… v2.1_CORRECTED: Special handling for Registration
+        if domain == TestDomain.REGISTRATION:
+            # v2.1 uses "words" field instead of "word_list"
+            registration_words = question.get("words", question.get("word_list", state.registration_words))
+            metadata["words"] = registration_words
+            # Store words for recall later
+            if "words" in question:
+                state.registration_words = registration_words
+            metadata["instruction_after"] = self._replace_greeting(
+                question.get("instruction_after", ""), state.greeting
+            )
+        
+        # âœ… v2.1_CORRECTED: Check if Recall is allowed (6 min = 360 seconds minimum delay)
+        if domain == TestDomain.RECALL:
+            if not self._check_recall_allowed(state):
+                remaining = self._get_recall_wait_time(state)
+                minutes = remaining // 60
+                seconds = remaining % 60
+                return (
+                    f"Vui lÃ²ng chá» thÃªm {minutes} phÃºt {seconds} giÃ¢y trÆ°á»›c khi tiáº¿p tá»¥c pháº§n nhá»› láº¡i.",

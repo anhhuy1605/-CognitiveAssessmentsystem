@@ -4827,7 +4827,12 @@ def cleanup_resources():
         if 'executor' in globals():
             logger.info("🛑 Shutting down ThreadPoolExecutor...")
             try:
-                executor.shutdown(wait=True, timeout=10)
+                # ✅ FIX: timeout parameter only available in Python 3.9+, use wait=True only
+                import sys
+                if sys.version_info >= (3, 9):
+                    executor.shutdown(wait=True, timeout=10)
+                else:
+                    executor.shutdown(wait=True)
                 logger.info("✅ ThreadPoolExecutor shut down")
             except Exception as e:
                 logger.warning(f"⚠️ Error shutting down executor: {e}")
@@ -5029,20 +5034,46 @@ def mmse_results_handler(session_id):
 
             logger.info(f"✅ Saved MMSE results for session {session_id}: {mmse_results_db[session_id]['totalScore']}/30")
             return jsonify({'success': True, 'message': 'MMSE results saved'})
-
-        else:
-            # GET - Look for MMSE results in database
-            if session_id in mmse_results_db:
-                result = mmse_results_db[session_id]
-                return jsonify({
-                    'success': True,
-                    'result': result
-                })
-
-            # Try finalize now if enough data
-            try_finalize_session(session_id)
-            if session_id in mmse_results_db:
-                return jsonify({'success': True, 'result': mmse_results_db[session_id]})
+        
+        # GET: Return MMSE results
+        if session_id in mmse_results_db:
+            result = mmse_results_db[session_id].copy()
+            # ✅ FIX: Ensure questionResults is always an array
+            result['questionResults'] = question_results_db.get(session_id, [])
+            
+            # ✅ COMPREHENSIVE RESULTS: Try to get comprehensive results from chatbot service
+            try:
+                from services.mmse_chatbot_service import MMSEChatbotService
+                chatbot_service_instance = MMSEChatbotService()
+                state = chatbot_service_instance.get_session(session_id)
+                
+                if state and state.completed_at:
+                    from services.comprehensive_results_generator import generate_comprehensive_results
+                    shap_explanations = None
+                    if state.mci_result:
+                        shap_explanations = {
+                            'feature_contributions': {},
+                            'grouped_contributions': state.mci_result.get('risk_components', {})
+                        }
+                    comprehensive_results = generate_comprehensive_results(
+                        session_state=state,
+                        shap_explanations=shap_explanations
+                    )
+                    result['comprehensive_results'] = comprehensive_results
+            except Exception as e:
+                logger.warning(f"⚠️ Could not generate comprehensive results: {e}")
+            
+            return jsonify({'success': True, **result})
+        
+        # ✅ FIX: Return empty array if no results found
+        return jsonify({
+            'success': True,
+            'sessionId': session_id,
+            'totalScore': 0,
+            'cognitiveStatus': 'Unknown',
+            'domainScores': {},
+            'questionResults': []  # ✅ FIX: Always return array
+        })
 
         # Check if session exists in assessment results
         session_results = []

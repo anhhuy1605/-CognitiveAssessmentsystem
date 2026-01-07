@@ -3,9 +3,10 @@
 import { useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { Suspense } from "react";
+import Link from "next/link";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Brain, TrendingUp, BarChart3, ArrowLeft, CheckCircle, Clock, AlertCircle, ChevronDown, ChevronUp, Download, Share } from "lucide-react";
+import { Brain, TrendingUp, BarChart3, ArrowLeft, CheckCircle, Clock, AlertCircle, ChevronDown, ChevronUp, Download, Share, FileText } from "lucide-react";
 import { MMSEUnifiedResultCard } from "@/components/MMSEUnifiedResultCard";
 
 // AssessmentResult interface removed - now using MMSEUnifiedResultCard directly
@@ -68,8 +69,13 @@ function ResultsPageInner() {
 					questionResultsCount: fetchedData.questionResults?.length || 0
 				});
 
+				// ✅ FIX: Ensure questionResults is an array before mapping
+				const questionResultsArray = Array.isArray(fetchedData.questionResults) 
+					? fetchedData.questionResults 
+					: (fetchedData.questionResults ? [fetchedData.questionResults] : []);
+				
 				// Transform question results to match MMSEUnifiedResultCard interface
-				const questionResults: any[] = (fetchedData.questionResults || []).map((q: any, index: number) => ({
+				const questionResults: any[] = questionResultsArray.map((q: any, index: number) => ({
 					questionId: q.questionId || index + 1,
 					questionText: q.questionText || q.question || `Câu hỏi ${q.questionId || index + 1}`,
 					domain: q.domain || q.category || 'assessment',
@@ -891,7 +897,17 @@ function ResultsPageInner() {
 			</div>
 
 				{/* Action Buttons */}
-				<div className='flex gap-3'>
+				<div className='flex gap-3 flex-wrap'>
+					{finalResult && (
+						<Link href={`/results/comprehensive?sessionId=${sessionId}`}>
+							<button className='flex items-center gap-2 px-4 py-2 text-white rounded-lg hover:opacity-90 transition-opacity' style={{
+								background: 'linear-gradient(135deg, #3B82F6 0%, #2563EB 100%)'
+							}}>
+								<FileText className='w-4 h-4' />
+								<span>Xem Báo Cáo Chi Tiết</span>
+							</button>
+						</Link>
+					)}
 					<button
 						onClick={handleExportPDF}
 						disabled={loading || !finalResult}

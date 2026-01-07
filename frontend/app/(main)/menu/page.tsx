@@ -31,6 +31,13 @@ const getMenuItems = (t: (key: string) => string): MenuItem[] => [
     bgColor: "bg-white"
   },
   {
+    href: "/results/comprehensive",
+    title: "Báo Cáo Chi Tiết",
+    description: "Xem kết quả đánh giá đầy đủ với SHAP, citations",
+    icon: "/brain.svg",
+    bgColor: "bg-white"
+  },
+  {
     href: "/stats",
     title: t("statistics"),
     description: t("statistics_desc"),
@@ -56,6 +63,13 @@ const getMenuItems = (t: (key: string) => string): MenuItem[] => [
     title: t("settings"),
     description: t("settings_desc"),
     icon: "/set.svg",
+    bgColor: "bg-white"
+  },
+  {
+    href: "/mmse-chatbot-v2",
+    title: "MMSE Chatbot V2",
+    description: "Phiên bản chatbot MMSE được cải tiến với architecture mới",
+    icon: "/brain.svg",
     bgColor: "bg-white"
   }
 ];
